@@ -1,0 +1,23 @@
+# ==============================
+# OS / System Files
+# ==============================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+desktop.ini
+ehthumbs.db
+Thumbs.db
+
+# ==============================
+# Build / Dependency Directories
+# ==============================
+dist/
+*.tar.gz
+
+data/
+*.db
+
+.env*
+!.env*example*

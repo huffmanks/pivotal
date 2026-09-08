@@ -1,0 +1,12 @@
+services:
+  url-shortener:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: huffmanks/url-shortener:${RELEASE_VERSION:-latest}
+    container_name: url-shortener
+    ports:
+      - "${PORT:-3011}:${PORT:-3011}"
+    environment:
+      PORT: ${PORT:-3011}
+    restart: unless-stopped

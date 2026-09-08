@@ -1,0 +1,53 @@
+version: 2
+
+project_name: url-shortener
+
+before:
+  hooks:
+    - just clean
+    - go mod tidy
+
+builds:
+  - id: "url-shortener"
+    binary: "url-shortener"
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: main.go
+    ldflags:
+      - -s -w
+
+archives:
+  - id: "archive"
+    ids:
+      - url-shortener
+    formats: ["tar.gz"]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge"
+
+release:
+  github:
+    owner: huffmanks
+    name: url-shortener
+  draft: false
+  prerelease: auto
+  footer: >-
+    ---
+    Built with ❤️ using GoReleaser.
