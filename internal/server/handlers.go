@@ -17,6 +17,7 @@ type ShortenRequest struct {
 
 type ShortenResponse struct {
 	Slug           string `json:"slug"`
+	URL            string `json:"url"`
 	DestinationURL string `json:"destination_url"`
 }
 
@@ -55,15 +56,24 @@ func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+
+	shortURL := scheme + "://" + r.Host + "/" + created.Slug
+
 	writeJSON(w, http.StatusCreated, ShortenResponse{
 		Slug:           created.Slug,
+		URL:            shortURL,
 		DestinationURL: created.DestinationURL,
 	})
 }
 
 func (s *Server) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	requestedPath := strings.Trim(r.URL.Path, "/")
-	if requestedPath == "" || isReservedSlug(requestedPath) {
+
+	if requestedPath == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -74,13 +84,31 @@ func (s *Server) handleRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetURL, err := mergeQueryParamsAndPath(l.DestinationURL, r.URL.Query(), extraPath)
+	handleResolvedRedirect(w, r, s.store, l, extraPath)
+}
+
+func handleResolvedRedirect(
+	w http.ResponseWriter,
+	r *http.Request,
+	store *link.Store,
+	l link.Link,
+	extraPath string,
+) {
+	targetURL, err := mergeQueryParamsAndPath(
+		l.DestinationURL,
+		r.URL.Query(),
+		extraPath,
+	)
 	if err != nil {
-		http.Error(w, "Failed to resolve redirect URL", http.StatusInternalServerError)
+		http.Error(
+			w,
+			"Failed to resolve redirect URL",
+			http.StatusInternalServerError,
+		)
 		return
 	}
 
-	s.store.RecordClick(link.ClickEvent{
+	store.RecordClick(link.ClickEvent{
 		LinkID:    l.ID,
 		Referer:   r.Referer(),
 		UserAgent: r.UserAgent(),
@@ -113,10 +141,11 @@ func mergeQueryParamsAndPath(rawDest string, incomingQuery url.Values, extraPath
 
 func isReservedSlug(slug string) bool {
 	switch slug {
-	case "api", "dashboard", "_health", "static", "favicon.ico":
+	case "api", "_health", "_app":
 		return true
 	}
-	return strings.HasPrefix(slug, "api/") || strings.HasPrefix(slug, "static/")
+
+	return strings.HasPrefix(slug, "api/")
 }
 
 func parseJSON(w http.ResponseWriter, r *http.Request, v any) error {

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +17,9 @@ import (
 	"url-shortener/internal/link"
 	"url-shortener/internal/server"
 )
+
+//go:embed web/build/*
+var web embed.FS
 
 func main() {
 	cfg := config.Load()
@@ -31,7 +36,12 @@ func main() {
 	}
 	defer store.Close()
 
-	srv := server.New(store)
+	webFS, err := fs.Sub(web, "web/build")
+	if err != nil {
+		log.Fatalf("failed to initialize web: %v", err)
+	}
+
+	srv := server.New(store, webFS)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,

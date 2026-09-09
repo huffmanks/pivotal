@@ -13,7 +13,11 @@ Thumbs.db
 # ==============================
 # Build / Dependency Directories
 # ==============================
+node_modules
+build/
 dist/
+.svelte-kit
+
 *.tar.gz
 
 data/

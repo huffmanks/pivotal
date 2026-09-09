@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 
 	"url-shortener/internal/link"
@@ -11,7 +12,7 @@ type Server struct {
 	handler http.Handler
 }
 
-func New(store *link.Store) *Server {
+func New(store *link.Store, web fs.FS) *Server {
 	mux := http.NewServeMux()
 
 	s := &Server{
@@ -23,7 +24,7 @@ func New(store *link.Store) *Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("GET /{slug...}", s.handleRedirect)
+	mux.Handle("/", WebHandler(web, store))
 
 	s.handler = Chain(mux, Recoverer, Logger)
 	return s
