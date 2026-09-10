@@ -16,11 +16,9 @@ const linkColumns = `
 	destination_url,
 	is_custom,
 	click_count,
-	created_at
+	created_at,
+	expires_at
 `
-
-// ADD above
-// TODO expires_at
 
 const (
 	clickBatchSize     = 100
@@ -53,14 +51,14 @@ func NewStore(db *sql.DB, cacheSize int) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Create(ctx context.Context, slug, destinationURL string, isCustom bool) (Link, error) {
+func (s *Store) Create(ctx context.Context, slug, destinationURL string, isCustom bool, expiresAt *time.Time) (Link, error) {
 	query := `
-		INSERT INTO links (slug, destination_url, is_custom)
-		VALUES (?, ?, ?)
+		INSERT INTO links (slug, destination_url, is_custom, expires_at)
+		VALUES (?, ?, ?, ?)
 		RETURNING ` + linkColumns
 
 	link, err := scanLink(
-		s.db.QueryRowContext(ctx, query, slug, destinationURL, isCustom),
+		s.db.QueryRowContext(ctx, query, slug, destinationURL, isCustom, expiresAt),
 	)
 	if err != nil {
 		return Link{}, err
@@ -273,7 +271,7 @@ func scanLink(scanner interface {
 		&link.IsCustom,
 		&link.ClickCount,
 		&link.CreatedAt,
-		// TODO &link.ExpiresAt,
+		&link.ExpiresAt,
 	)
 
 	return link, err

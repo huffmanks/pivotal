@@ -5,18 +5,21 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"url-shortener/internal/link"
 )
 
 type ShortenRequest struct {
-	Slug           string `json:"slug,omitempty"`
-	DestinationURL string `json:"destination_url"`
+	Slug           string     `json:"slug,omitempty"`
+	DestinationURL string     `json:"destination_url"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 
 type ShortenResponse struct {
-	Slug           string `json:"slug"`
-	DestinationURL string `json:"destination_url"`
+	Slug           string     `json:"slug"`
+	DestinationURL string     `json:"destination_url"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
 
 func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +47,7 @@ func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
 		slug = link.GenerateBase62ID(6)
 	}
 
-	created, err := s.store.Create(r.Context(), slug, req.DestinationURL, isCustom)
+	created, err := s.store.Create(r.Context(), slug, req.DestinationURL, isCustom, req.ExpiresAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			http.Error(w, `{"error":"Slug already exists"}`, http.StatusConflict)
@@ -57,6 +60,7 @@ func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, ShortenResponse{
 		Slug:           created.Slug,
 		DestinationURL: created.DestinationURL,
+		ExpiresAt:      created.ExpiresAt,
 	})
 }
 
