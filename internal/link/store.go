@@ -10,6 +10,24 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
+const linkColumns = `
+	id,
+	slug,
+	destination_url,
+	is_custom,
+	click_count,
+	created_at
+`
+
+// ADD above
+// TODO expires_at
+
+const (
+	clickBatchSize     = 100
+	clickBufferSize    = 2000
+	clickFlushInterval = 2 * time.Second
+)
+
 type Store struct {
 	db        *sql.DB
 	cache     *lru.Cache[string, Link]
@@ -26,7 +44,7 @@ func NewStore(db *sql.DB, cacheSize int) (*Store, error) {
 	s := &Store{
 		db:        db,
 		cache:     cache,
-		clickChan: make(chan ClickEvent, 2000),
+		clickChan: make(chan ClickEvent, clickBufferSize),
 	}
 
 	s.wg.Add(1)
@@ -36,23 +54,74 @@ func NewStore(db *sql.DB, cacheSize int) (*Store, error) {
 }
 
 func (s *Store) Create(ctx context.Context, slug, destinationURL string, isCustom bool) (Link, error) {
-	query := `INSERT INTO links (slug, destination_url, is_custom) VALUES (?, ?, ?)`
-	res, err := s.db.ExecContext(ctx, query, slug, destinationURL, isCustom)
+	query := `
+		INSERT INTO links (slug, destination_url, is_custom)
+		VALUES (?, ?, ?)
+		RETURNING ` + linkColumns
+
+	link, err := scanLink(
+		s.db.QueryRowContext(ctx, query, slug, destinationURL, isCustom),
+	)
 	if err != nil {
 		return Link{}, err
 	}
 
-	id, _ := res.LastInsertId()
-	link := Link{
-		ID:             id,
-		Slug:           slug,
-		DestinationURL: destinationURL,
-		IsCustom:       isCustom,
-		CreatedAt:      time.Now(),
+	s.cache.Add(link.Slug, link)
+
+	return link, nil
+}
+
+func (s *Store) List(ctx context.Context) ([]Link, error) {
+	query := `
+		SELECT ` + linkColumns + `
+		FROM links
+		ORDER BY id DESC
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	links := make([]Link, 0)
+
+	for rows.Next() {
+		link, err := scanLink(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		links = append(links, link)
 	}
 
-	s.cache.Add(slug, link)
-	return link, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return links, nil
+}
+
+func (s *Store) GetByID(ctx context.Context, id int64) (Link, bool, error) {
+	query := `
+		SELECT ` + linkColumns + `
+		FROM links
+		WHERE id = ?
+	`
+
+	link, err := scanLink(
+		s.db.QueryRowContext(ctx, query, id),
+	)
+
+	if err == sql.ErrNoRows {
+		return Link{}, false, nil
+	}
+
+	if err != nil {
+		return Link{}, false, err
+	}
+
+	return link, true, nil
 }
 
 func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, bool) {
@@ -61,11 +130,16 @@ func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, boo
 	}
 
 	currentPath := fullPath
+
 	for {
-		var link Link
-		query := `SELECT id, slug, destination_url, is_custom, click_count, created_at FROM links WHERE slug = ?`
-		err := s.db.QueryRowContext(ctx, query, currentPath).Scan(
-			&link.ID, &link.Slug, &link.DestinationURL, &link.IsCustom, &link.ClickCount, &link.CreatedAt,
+		query := `
+			SELECT ` + linkColumns + `
+			FROM links
+			WHERE slug = ?
+		`
+
+		link, err := scanLink(
+			s.db.QueryRowContext(ctx, query, currentPath),
 		)
 
 		if err == nil {
@@ -78,6 +152,7 @@ func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, boo
 		if idx == -1 {
 			break
 		}
+
 		currentPath = currentPath[:idx]
 	}
 
@@ -98,42 +173,21 @@ func (s *Store) Close() {
 
 func (s *Store) processClicks() {
 	defer s.wg.Done()
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	var batch []ClickEvent
+	batch := make([]ClickEvent, 0, 100)
 
 	flush := func() {
 		if len(batch) == 0 {
 			return
 		}
 
-		tx, err := s.db.Begin()
-		if err != nil {
-			batch = batch[:0]
+		if err := s.flushClicks(batch); err != nil {
 			return
 		}
 
-		stmtClick, _ := tx.Prepare("INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at) VALUES (?, ?, ?, ?)")
-		stmtCount, _ := tx.Prepare("UPDATE links SET click_count = click_count + 1 WHERE id = ?")
-
-		if stmtClick != nil {
-			defer stmtClick.Close()
-		}
-		if stmtCount != nil {
-			defer stmtCount.Close()
-		}
-
-		for _, click := range batch {
-			if stmtClick != nil {
-				stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt)
-			}
-			if stmtCount != nil {
-				stmtCount.Exec(click.LinkID)
-			}
-		}
-
-		_ = tx.Commit()
 		batch = batch[:0]
 	}
 
@@ -144,16 +198,83 @@ func (s *Store) processClicks() {
 				flush()
 				return
 			}
+
 			batch = append(batch, event)
+
 			if len(batch) >= 100 {
 				flush()
 			}
+
 		case <-ticker.C:
 			flush()
 		}
 	}
 }
 
-func BuildTargetURL(rawDest string, incomingQuery map[string][]string, extraPath string) (string, error) {
-	return rawDest, nil
+func (s *Store) flushClicks(batch []ClickEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback()
+
+	stmtClick, err := tx.Prepare(`
+		INSERT INTO link_clicks (
+			link_id,
+			referer,
+			user_agent,
+			clicked_at
+		)
+		VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmtClick.Close()
+
+	stmtCount, err := tx.Prepare(`
+		UPDATE links
+		SET click_count = click_count + 1
+		WHERE id = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmtCount.Close()
+
+	for _, click := range batch {
+		if _, err := stmtClick.Exec(
+			click.LinkID,
+			click.Referer,
+			click.UserAgent,
+			click.ClickedAt,
+		); err != nil {
+			return err
+		}
+
+		if _, err := stmtCount.Exec(click.LinkID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func scanLink(scanner interface {
+	Scan(dest ...any) error
+}) (Link, error) {
+	var link Link
+
+	err := scanner.Scan(
+		&link.ID,
+		&link.Slug,
+		&link.DestinationURL,
+		&link.IsCustom,
+		&link.ClickCount,
+		&link.CreatedAt,
+		// TODO &link.ExpiresAt,
+	)
+
+	return link, err
 }

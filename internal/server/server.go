@@ -20,10 +20,11 @@ func New(store *link.Store, web fs.FS) *Server {
 	}
 
 	mux.HandleFunc("POST /api/shorten", s.handleShorten)
-	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	})
+	mux.HandleFunc("GET /api/links", s.handleListLinks)
+	mux.HandleFunc("GET /api/links/{id}", s.handleGetLink)
+
+	mux.HandleFunc("GET /_health", s.handleHealth)
+
 	mux.Handle("/", WebHandler(web, store))
 
 	s.handler = Chain(mux, Recoverer, Logger)

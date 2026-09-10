@@ -96,7 +96,7 @@ Create a short link:
 ```sh
 curl -X POST http://localhost:3011/api/shorten \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/about/some-path"}'
+  -d '{"destination_url":"https://example.com/about/some-path"}'
 ```
 
 Create a link with a custom slug:
@@ -105,7 +105,7 @@ Create a link with a custom slug:
 curl -X POST http://localhost:3011/api/shorten \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://example.com/about/some-path",
-    "custom_slug": "my-link"
+    "destination_url": "https://example.com/about/some-path",
+    "slug": "my-link"
   }'
 ```

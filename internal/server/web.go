@@ -3,8 +3,10 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"url-shortener/internal/link"
 )
@@ -52,4 +54,57 @@ func serveWeb(w http.ResponseWriter, r *http.Request, files fs.FS) {
 	}
 
 	http.ServeFileFS(w, r, files, "200.html")
+}
+
+func handleResolvedRedirect(
+	w http.ResponseWriter,
+	r *http.Request,
+	store *link.Store,
+	l link.Link,
+	extraPath string,
+) {
+	targetURL, err := mergeQueryParamsAndPath(
+		l.DestinationURL,
+		r.URL.Query(),
+		extraPath,
+	)
+	if err != nil {
+		http.Error(
+			w,
+			"Failed to resolve redirect URL",
+			http.StatusInternalServerError,
+		)
+		return
+	}
+
+	store.RecordClick(link.ClickEvent{
+		LinkID:    l.ID,
+		Referer:   r.Referer(),
+		UserAgent: r.UserAgent(),
+		ClickedAt: time.Now(),
+	})
+
+	http.Redirect(w, r, targetURL, http.StatusFound)
+}
+
+func mergeQueryParamsAndPath(rawDest string, incomingQuery url.Values, extraPath string) (string, error) {
+	destURL, err := url.Parse(rawDest)
+	if err != nil {
+		return "", err
+	}
+
+	if extraPath != "" {
+		destURL.Path = path.Join(destURL.Path, extraPath)
+	}
+
+	destQuery := destURL.Query()
+	for key, values := range incomingQuery {
+		destQuery.Del(key)
+		for _, v := range values {
+			destQuery.Add(key, v)
+		}
+	}
+
+	destURL.RawQuery = destQuery.Encode()
+	return destURL.String(), nil
 }

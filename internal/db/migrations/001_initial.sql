@@ -1,0 +1,18 @@
+CREATE TABLE links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE CHECK(length(slug) <= 255),
+    destination_url TEXT NOT NULL,
+    is_custom INTEGER NOT NULL DEFAULT 0,
+    click_count INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_links_slug ON links(slug);
+
+CREATE TABLE link_clicks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    link_id INTEGER NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+    referer TEXT,
+    user_agent TEXT,
+    clicked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
