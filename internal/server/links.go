@@ -3,24 +3,14 @@ package server
 import (
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
 	"url-shortener/internal/db"
-	"url-shortener/internal/link"
 )
 
 type ShortenRequest struct {
-	Slug           string     `json:"slug,omitempty"`
-	DestinationURL string     `json:"destination_url"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-}
-
-type ShortenResponse struct {
-	Slug           string     `json:"slug"`
-	DestinationURL string     `json:"destination_url"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	Slug           string `json:"slug,omitempty"`
+	DestinationURL string `json:"destination_url"`
 }
 
 func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
@@ -39,45 +29,33 @@ func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
 	slug := strings.Trim(strings.TrimSpace(req.Slug), "/")
 	isCustom := slug != ""
 
-	if isCustom {
-		if isReservedSlug(slug) {
-			http.Error(w, `{"error":"Slug is a reserved path"}`, http.StatusBadRequest)
-			return
-		}
-	} else {
-		slug = link.GenerateBase62ID(6)
+	if isCustom && isReservedSlug(slug) {
+		http.Error(w, `{"error":"Slug is a reserved path"}`, http.StatusBadRequest)
+		return
 	}
 
-	created, err := s.store.Create(r.Context(), slug, req.DestinationURL, isCustom, req.ExpiresAt)
+	created, err := s.store.Create(
+		r.Context(),
+		slug,
+		req.DestinationURL,
+		isCustom,
+		nil,
+	)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if db.IsUniqueConstraintError(err) {
 			http.Error(w, `{"error":"Slug already exists"}`, http.StatusConflict)
 			return
 		}
+
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, ShortenResponse{
-		Slug:           created.Slug,
-		DestinationURL: created.DestinationURL,
-		ExpiresAt:      created.ExpiresAt,
-	})
+	WriteJSON(w, http.StatusCreated, created)
 }
 
 func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
-	links, err := db.List[link.Link](r.Context(), s.db, `
-		SELECT
-			id,
-			slug,
-			destination_url,
-			is_custom,
-			click_count,
-			created_at,
-			expires_at
-		FROM links
-		ORDER BY id DESC
-	`)
+	links, err := s.store.List(r.Context())
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -87,29 +65,13 @@ func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetLink(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	id, err := parseID(r, "id")
 	if err != nil {
 		http.Error(w, `{"error":"Invalid link ID"}`, http.StatusBadRequest)
 		return
 	}
 
-	l, found, err := db.GetByID[link.Link](
-		r.Context(),
-		s.db,
-		`
-			SELECT
-				id,
-				slug,
-				destination_url,
-				is_custom,
-				click_count,
-				created_at,
-				expires_at
-			FROM links
-			WHERE id = ?
-		`,
-		id,
-	)
+	l, found, err := s.store.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return

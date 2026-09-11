@@ -13,7 +13,7 @@ import (
 
 func WebHandler(files fs.FS, store *link.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestedPath := strings.Trim(r.URL.Path, "/")
+		requestedPath := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/"))
 
 		if requestedPath != "" {
 			if l, extraPath, found := store.Resolve(r.Context(), requestedPath); found {
@@ -36,14 +36,12 @@ func serveWeb(w http.ResponseWriter, r *http.Request, files fs.FS) {
 
 	if info, err := fs.Stat(files, name); err == nil {
 		if info.IsDir() {
-			name = strings.TrimSuffix(name, "/") + "/index.html"
-
+			name = path.Join(name, "index.html")
 			if _, err := fs.Stat(files, name); err != nil {
 				http.NotFound(w, r)
 				return
 			}
 		}
-
 		http.ServeFileFS(w, r, files, name)
 		return
 	}
@@ -63,17 +61,9 @@ func handleResolvedRedirect(
 	l link.Link,
 	extraPath string,
 ) {
-	targetURL, err := mergeQueryParamsAndPath(
-		l.DestinationURL,
-		r.URL.Query(),
-		extraPath,
-	)
+	targetURL, err := mergeQueryParamsAndPath(l.DestinationURL, r.URL.Query(), extraPath)
 	if err != nil {
-		http.Error(
-			w,
-			"Failed to resolve redirect URL",
-			http.StatusInternalServerError,
-		)
+		http.Error(w, "Failed to resolve redirect URL", http.StatusInternalServerError)
 		return
 	}
 
@@ -97,14 +87,16 @@ func mergeQueryParamsAndPath(rawDest string, incomingQuery url.Values, extraPath
 		destURL.Path = path.Join(destURL.Path, extraPath)
 	}
 
-	destQuery := destURL.Query()
-	for key, values := range incomingQuery {
-		destQuery.Del(key)
-		for _, v := range values {
-			destQuery.Add(key, v)
+	if len(incomingQuery) > 0 {
+		destQuery := destURL.Query()
+		for key, values := range incomingQuery {
+			destQuery.Del(key)
+			for _, v := range values {
+				destQuery.Add(key, v)
+			}
 		}
+		destURL.RawQuery = destQuery.Encode()
 	}
 
-	destURL.RawQuery = destQuery.Encode()
 	return destURL.String(), nil
 }

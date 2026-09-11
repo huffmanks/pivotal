@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -12,27 +11,10 @@ import (
 	"url-shortener/internal/db"
 )
 
-const linkColumns = `
-	id,
-	slug,
-	destination_url,
-	is_custom,
-	click_count,
-	created_at,
-	expires_at
-`
-
-const (
-	clickBatchSize     = 100
-	clickBufferSize    = 2000
-	clickFlushInterval = 2 * time.Second
-)
-
 type Store struct {
-	db        *sql.DB
-	cache     *lru.Cache[string, Link]
-	clickChan chan ClickEvent
-	wg        sync.WaitGroup
+	db     *sql.DB
+	cache  *lru.Cache[string, Link]
+	clicks *clickTracker
 }
 
 func NewStore(db *sql.DB, cacheSize int) (*Store, error) {
@@ -41,16 +23,11 @@ func NewStore(db *sql.DB, cacheSize int) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{
-		db:        db,
-		cache:     cache,
-		clickChan: make(chan ClickEvent, clickBufferSize),
-	}
-
-	s.wg.Add(1)
-	go s.processClicks()
-
-	return s, nil
+	return &Store{
+		db:     db,
+		cache:  cache,
+		clicks: newClickTracker(db),
+	}, nil
 }
 
 func (s *Store) Create(
@@ -61,38 +38,153 @@ func (s *Store) Create(
 	expiresAt *time.Time,
 ) (Link, error) {
 	for {
-		query := `
-			INSERT INTO links (
-				slug,
-				destination_url,
-				is_custom,
-				expires_at
-			)
-			VALUES (?, ?, ?, ?)
-			RETURNING ` + linkColumns
+		var err error
+		if slug == "" {
+			slug, err = GenerateBase62ID(6)
+			if err != nil {
+				return Link{}, err
+			}
+		}
 
-		link, err := db.Scan[Link](
-			s.db.QueryRowContext(
-				ctx,
-				query,
-				slug,
-				destinationURL,
-				isCustom,
-				expiresAt,
-			),
+		query := `
+            INSERT INTO links (
+                slug,
+                destination_url,
+                is_custom,
+                expires_at
+            )
+            VALUES (?, ?, ?, ?)
+            RETURNING id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        `
+
+		var l Link
+		err = s.db.QueryRowContext(
+			ctx,
+			query,
+			slug,
+			destinationURL,
+			isCustom,
+			expiresAt,
+		).Scan(
+			&l.ID,
+			&l.Slug,
+			&l.DestinationURL,
+			&l.IsCustom,
+			&l.ClickCount,
+			&l.CreatedAt,
+			&l.ExpiresAt,
 		)
 
 		if err == nil {
-			s.cache.Add(link.Slug, link)
-			return link, nil
+			s.cache.Add(l.Slug, l)
+			return l, nil
 		}
 
 		if isCustom || !db.IsUniqueConstraintError(err) {
 			return Link{}, err
 		}
 
-		slug = GenerateBase62ID(6)
+		slug = ""
 	}
+}
+
+func (s *Store) GetByID(ctx context.Context, id int64) (Link, bool, error) {
+	var l Link
+	err := s.db.QueryRowContext(ctx, `
+        SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        FROM links
+        WHERE id = ?
+    `, id).Scan(
+		&l.ID,
+		&l.Slug,
+		&l.DestinationURL,
+		&l.IsCustom,
+		&l.ClickCount,
+		&l.CreatedAt,
+		&l.ExpiresAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return Link{}, false, nil
+	}
+	if err != nil {
+		return Link{}, false, err
+	}
+
+	return l, true, nil
+}
+
+func (s *Store) List(ctx context.Context) ([]Link, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        FROM links
+        ORDER BY id DESC
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []Link
+	for rows.Next() {
+		var l Link
+		if err := rows.Scan(
+			&l.ID,
+			&l.Slug,
+			&l.DestinationURL,
+			&l.IsCustom,
+			&l.ClickCount,
+			&l.CreatedAt,
+			&l.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		links = append(links, l)
+	}
+
+	return links, rows.Err()
+}
+
+func (s *Store) ListClicksByLinkID(ctx context.Context, linkID int64) ([]ClickEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT id, link_id, referer, user_agent, clicked_at
+        FROM link_clicks
+        WHERE link_id = ?
+        ORDER BY clicked_at DESC
+    `, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clicks []ClickEvent
+	for rows.Next() {
+		var c ClickEvent
+		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt); err != nil {
+			return nil, err
+		}
+		clicks = append(clicks, c)
+	}
+
+	return clicks, rows.Err()
+}
+
+func (s *Store) GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error) {
+	var c ClickEvent
+	err := s.db.QueryRowContext(ctx, `
+        SELECT id, link_id, referer, user_agent, clicked_at
+        FROM link_clicks
+        WHERE id = ?
+    `, id).Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt)
+
+	if err == sql.ErrNoRows {
+		return ClickEvent{}, false, nil
+	}
+	if err != nil {
+		return ClickEvent{}, false, err
+	}
+
+	return c, true, nil
 }
 
 func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, bool) {
@@ -100,27 +192,31 @@ func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, boo
 		if link.ExpiresAt == nil || link.ExpiresAt.After(time.Now()) {
 			return link, "", true
 		}
-
 		s.cache.Remove(fullPath)
 	}
 
 	currentPath := fullPath
 
 	for {
-		query := `
-			SELECT ` + linkColumns + `
-			FROM links
-			WHERE slug = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-		`
-
-		resolved, err := db.Scan[Link](
-			s.db.QueryRowContext(ctx, query, currentPath),
+		var l Link
+		err := s.db.QueryRowContext(ctx, `
+            SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
+            FROM links
+            WHERE slug = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        `, currentPath).Scan(
+			&l.ID,
+			&l.Slug,
+			&l.DestinationURL,
+			&l.IsCustom,
+			&l.ClickCount,
+			&l.CreatedAt,
+			&l.ExpiresAt,
 		)
 
 		if err == nil {
 			extraPath := strings.TrimPrefix(fullPath, currentPath)
-			s.cache.Add(currentPath, resolved)
-			return resolved, extraPath, true
+			s.cache.Add(currentPath, l)
+			return l, extraPath, true
 		}
 
 		if err != sql.ErrNoRows {
@@ -139,78 +235,9 @@ func (s *Store) Resolve(ctx context.Context, fullPath string) (Link, string, boo
 }
 
 func (s *Store) RecordClick(event ClickEvent) {
-	select {
-	case s.clickChan <- event:
-	default:
-	}
+	s.clicks.record(event)
 }
 
 func (s *Store) Close() {
-	close(s.clickChan)
-	s.wg.Wait()
-}
-
-func (s *Store) processClicks() {
-	defer s.wg.Done()
-
-	ticker := time.NewTicker(clickFlushInterval)
-	defer ticker.Stop()
-
-	batch := make([]ClickEvent, 0, clickBatchSize)
-
-	flush := func() {
-		if len(batch) == 0 {
-			return
-		}
-
-		if err := s.flushClicks(batch); err != nil {
-			return
-		}
-
-		batch = batch[:0]
-	}
-
-	for {
-		select {
-		case event, ok := <-s.clickChan:
-			if !ok {
-				flush()
-				return
-			}
-
-			batch = append(batch, event)
-
-			if len(batch) >= clickBatchSize {
-				flush()
-			}
-
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-func (s *Store) flushClicks(batch []ClickEvent) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	defer tx.Rollback()
-
-	for _, click := range batch {
-		if err := db.Insert(tx, "link_clicks", click); err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(`
-			UPDATE links
-			SET click_count = click_count + 1
-			WHERE id = ?
-		`, click.LinkID); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	s.clicks.close()
 }
