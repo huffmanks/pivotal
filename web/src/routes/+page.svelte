@@ -1,2 +1,8 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<h1 class="mb-2 text-2xl font-bold">
+  <span class="text-accent-foreground">Welcome</span> to
+  <span class="text-primary"> Pivotal</span>
+</h1>
+<p>
+  Visit <a href="/links" class="text-primary underline underline-offset-2">links page</a> to see what
+  you got.
+</p>
