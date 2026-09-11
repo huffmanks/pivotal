@@ -2,31 +2,36 @@ package config
 
 import (
 	"os"
-	"path/filepath"
+	"strconv"
 )
 
 type Config struct {
-	Port   string
-	DBPath string
+	Port        string
+	DatabaseURL string
+	CacheSize   int
 }
 
-func Load() Config {
+func Load() *Config {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "3011"
+		port = "8080"
 	}
 
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		if userDir, err := os.UserConfigDir(); err == nil {
-			dbPath = filepath.Join(userDir, "url-shortener", "shortener.db")
-		} else {
-			dbPath = "./data/shortener.db"
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "data.db"
+	}
+
+	cacheSize := 1000
+	if val := os.Getenv("CACHE_SIZE"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			cacheSize = parsed
 		}
 	}
 
-	return Config{
-		Port:   port,
-		DBPath: dbPath,
+	return &Config{
+		Port:        port,
+		DatabaseURL: dbURL,
+		CacheSize:   cacheSize,
 	}
 }

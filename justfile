@@ -6,7 +6,7 @@ dist_path := "dist"
 version := "1.0.0"
 docker_builder := "url-shortener_builder"
 
-default: dev
+set default-list := true
 
 # Clean build artifacts
 clean:
@@ -19,12 +19,21 @@ dev: server web
 # Run Go server
 server:
     @echo "🚀 Starting Server..."
-    @go run main.go 2>&1 | awk '{print "\033[1;36m[SERVER]\033[0m " $0}'
+    @go run ./cmd/server 2>&1 | awk '{print "\033[1;36m[SERVER]\033[0m " $0}'
 
 # Run web
 web:
     @echo "🌐 Starting Web Server..."
     @cd web && pnpm dev 2>&1 | awk '{print "\033[1;35m[WEB]\033[0m " $0}'
+
+# Run all unit tests
+test:
+	go test -v -race -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
+
+# Generate coverage report
+coverage: test
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
 
 # Build server
 build-server:

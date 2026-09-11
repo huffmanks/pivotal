@@ -42,7 +42,7 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if err := migrate(db); err != nil {
+	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func configure(db *sql.DB) error {
 	return nil
 }
 
-func migrate(db *sql.DB) error {
+func Migrate(db *sql.DB) error {
 	if err := createSchemaVersionTable(db); err != nil {
 		return err
 	}

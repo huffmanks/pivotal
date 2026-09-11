@@ -22,7 +22,7 @@ COPY --from=web-builder /app/web/build ./web/build
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
-    -o dist/url-shortener main.go
+    -o dist/url-shortener ./cmd/server
 
 RUN mkdir -p /data && chown -R 65532:65532 /data
 

@@ -16,15 +16,16 @@ const (
 type clickTracker struct {
 	db     *sql.DB
 	events chan ClickEvent
-	mu     sync.RWMutex
+	done   chan struct{}
 	wg     sync.WaitGroup
-	closed bool
+	once   sync.Once
 }
 
 func newClickTracker(db *sql.DB) *clickTracker {
 	tracker := &clickTracker{
 		db:     db,
 		events: make(chan ClickEvent, clickBufferSize),
+		done:   make(chan struct{}),
 	}
 
 	tracker.wg.Add(1)
@@ -34,11 +35,10 @@ func newClickTracker(db *sql.DB) *clickTracker {
 }
 
 func (t *clickTracker) record(event ClickEvent) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if t.closed {
+	select {
+	case <-t.done:
 		return
+	default:
 	}
 
 	timer := time.NewTimer(50 * time.Millisecond)
@@ -46,22 +46,17 @@ func (t *clickTracker) record(event ClickEvent) {
 
 	select {
 	case t.events <- event:
+	case <-t.done:
 	case <-timer.C:
 		log.Printf("warning: click tracker buffer full, dropped click for link_id: %d", event.LinkID)
 	}
 }
 
 func (t *clickTracker) close() {
-	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return
-	}
-	t.closed = true
-	close(t.events)
-	t.mu.Unlock()
-
-	t.wg.Wait()
+	t.once.Do(func() {
+		close(t.done)
+		t.wg.Wait()
+	})
 }
 
 func (t *clickTracker) process() {
@@ -85,11 +80,20 @@ func (t *clickTracker) process() {
 
 	for {
 		select {
-		case event, ok := <-t.events:
-			if !ok {
-				flush()
-				return
+		case <-t.done:
+			for {
+				select {
+				case event := <-t.events:
+					batch = append(batch, event)
+					if len(batch) >= clickBatchSize {
+						flush()
+					}
+				default:
+					flush()
+					return
+				}
 			}
+		case event := <-t.events:
 			batch = append(batch, event)
 			if len(batch) >= clickBatchSize {
 				flush()
@@ -107,17 +111,28 @@ func (t *clickTracker) flush(batch []ClickEvent) error {
 	}
 	defer tx.Rollback()
 
+	stmtClick, err := tx.Prepare(`
+        INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at)
+        VALUES (?, ?, ?, ?)
+    `)
+	if err != nil {
+		return err
+	}
+	defer stmtClick.Close()
+
+	stmtCount, err := tx.Prepare(`
+        UPDATE links SET click_count = click_count + 1 WHERE id = ?
+    `)
+	if err != nil {
+		return err
+	}
+	defer stmtCount.Close()
+
 	for _, click := range batch {
-		if _, err := tx.Exec(`
-            INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at)
-            VALUES (?, ?, ?, ?)
-        `, click.LinkID, click.Referer, click.UserAgent, click.ClickedAt); err != nil {
+		if _, err := stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt); err != nil {
 			return err
 		}
-
-		if _, err := tx.Exec(`
-            UPDATE links SET click_count = click_count + 1 WHERE id = ?
-        `, click.LinkID); err != nil {
+		if _, err := stmtCount.Exec(click.LinkID); err != nil {
 			return err
 		}
 	}

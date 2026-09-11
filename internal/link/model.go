@@ -13,9 +13,15 @@ type Link struct {
 }
 
 type ClickEvent struct {
-	ID        int64     `json:"id,omitempty"`
+	ID        int64     `json:"id"`
 	LinkID    int64     `json:"link_id"`
 	Referer   string    `json:"referer"`
 	UserAgent string    `json:"user_agent"`
 	ClickedAt time.Time `json:"clicked_at"`
+}
+
+type CreateLinkRequest struct {
+	Slug           string     `json:"slug,omitempty"`
+	DestinationURL string     `json:"destination_url"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }

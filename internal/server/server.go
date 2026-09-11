@@ -1,40 +1,30 @@
 package server
 
 import (
-	"database/sql"
 	"io/fs"
 	"net/http"
 
 	"url-shortener/internal/link"
+	"url-shortener/internal/middleware"
 )
 
 type Server struct {
-	store   *link.Store
-	db      *sql.DB
 	handler http.Handler
 }
 
-func NewServer(store *link.Store, db *sql.DB, web fs.FS) *Server {
-	s := &Server{
-		store: store,
-		db:    db,
-	}
-
+func NewServer(linkSvc link.Service, webFS fs.FS) *Server {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /api/shorten", s.handleShorten)
+	linkHandler := link.NewHandler(linkSvc)
+	linkHandler.RegisterRoutes(mux)
 
-	mux.HandleFunc("GET /api/links", s.handleListLinks)
-	mux.HandleFunc("GET /api/links/{id}", s.handleGetLink)
+	mux.HandleFunc("GET /_health", handleHealth)
 
-	mux.HandleFunc("GET /api/links/{id}/clicks", s.handleListClicks)
-	mux.HandleFunc("GET /api/links/{id}/clicks/{clickID}", s.handleGetClick)
+	mux.Handle("/", WebHandler(webFS, linkSvc))
 
-	mux.HandleFunc("GET /_health", s.handleHealth)
-
-	mux.Handle("/", WebHandler(web, store))
-
-	s.handler = Chain(mux, Recoverer, Logger)
+	s := &Server{
+		handler: middleware.Chain(mux, middleware.Recoverer, middleware.Logger),
+	}
 	return s
 }
 
