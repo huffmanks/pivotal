@@ -14,12 +14,12 @@ type Config struct {
 func Load() *Config {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "3011"
 	}
 
-	dbURL := os.Getenv("DATABASE_URL")
+	dbURL := os.Getenv("DB_PATH")
 	if dbURL == "" {
-		dbURL = "data.db"
+		dbURL = "./data/pivotal.db"
 	}
 
 	cacheSize := 1000
