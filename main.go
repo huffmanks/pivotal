@@ -36,12 +36,12 @@ func main() {
 	}
 	defer store.Close()
 
-	webFS, err := fs.Sub(web, "web/build")
+	web, err := fs.Sub(web, "web/build")
 	if err != nil {
 		log.Fatalf("failed to initialize web: %v", err)
 	}
 
-	srv := server.New(store, webFS)
+	srv := server.NewServer(store, database, web)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,

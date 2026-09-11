@@ -1,4 +1,4 @@
-CREATE TABLE links (
+CREATE TABLE IF NOT EXISTS links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slug TEXT NOT NULL UNIQUE CHECK(length(slug) <= 255),
     destination_url TEXT NOT NULL,
@@ -7,9 +7,10 @@ CREATE TABLE links (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX idx_links_slug ON links(slug);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_links_slug
+ON links(slug);
 
-CREATE TABLE link_clicks (
+CREATE TABLE IF NOT EXISTS link_clicks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     link_id INTEGER NOT NULL REFERENCES links(id) ON DELETE CASCADE,
     referer TEXT,

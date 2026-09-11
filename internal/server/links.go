@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"url-shortener/internal/db"
 	"url-shortener/internal/link"
 )
 
@@ -65,7 +66,18 @@ func (s *Server) handleShorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
-	links, err := s.store.List(r.Context())
+	links, err := db.List[link.Link](r.Context(), s.db, `
+		SELECT
+			id,
+			slug,
+			destination_url,
+			is_custom,
+			click_count,
+			created_at,
+			expires_at
+		FROM links
+		ORDER BY id DESC
+	`)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
@@ -81,7 +93,23 @@ func (s *Server) handleGetLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l, found, err := s.store.GetByID(r.Context(), id)
+	l, found, err := db.GetByID[link.Link](
+		r.Context(),
+		s.db,
+		`
+			SELECT
+				id,
+				slug,
+				destination_url,
+				is_custom,
+				click_count,
+				created_at,
+				expires_at
+			FROM links
+			WHERE id = ?
+		`,
+		id,
+	)
 	if err != nil {
 		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
 		return
