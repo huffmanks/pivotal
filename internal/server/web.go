@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"url-shortener/internal/link"
+	"pivotal/internal/link"
 )
 
 func WebHandler(files fs.FS, linkSvc link.Service) http.Handler {

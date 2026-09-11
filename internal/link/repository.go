@@ -11,6 +11,8 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (Link, bool, error)
 	GetBySlug(ctx context.Context, slug string) (Link, bool, error)
 	List(ctx context.Context) ([]Link, error)
+	Update(ctx context.Context, id int64, slug, dest string, isCustom bool, exp *time.Time) (Link, bool, error)
+	Delete(ctx context.Context, id int64) (string, bool, error)
 
 	RecordClick(event ClickEvent)
 	GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error)
@@ -129,4 +131,30 @@ func (r *sqliteRepository) ListClicksByLinkID(ctx context.Context, linkID int64)
 
 func (r *sqliteRepository) Close() {
 	r.clicks.close()
+}
+
+func (r *sqliteRepository) Update(ctx context.Context, id int64, slug, dest string, isCustom bool, exp *time.Time) (Link, bool, error) {
+	query := `
+		UPDATE links
+		SET slug = ?, destination_url = ?, is_custom = ?, expires_at = ?
+		WHERE id = ?
+		RETURNING id, slug, destination_url, is_custom, click_count, created_at, expires_at
+	`
+	var l Link
+	err := r.db.QueryRowContext(ctx, query, slug, dest, isCustom, exp, id).Scan(
+		&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+	)
+	if err == sql.ErrNoRows {
+		return Link{}, false, nil
+	}
+	return l, err == nil, err
+}
+
+func (r *sqliteRepository) Delete(ctx context.Context, id int64) (string, bool, error) {
+	var slug string
+	err := r.db.QueryRowContext(ctx, `DELETE FROM links WHERE id = ? RETURNING slug`, id).Scan(&slug)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	return slug, err == nil, err
 }

@@ -22,7 +22,7 @@ COPY --from=web-builder /app/web/build ./web/build
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
-    -o dist/url-shortener ./cmd/server
+    -o dist/pivotal ./cmd/server
 
 RUN mkdir -p /data && chown -R 65532:65532 /data
 
@@ -32,15 +32,15 @@ FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /
 
 COPY --from=builder --chown=nonroot:nonroot /data /data
-COPY --from=builder /app/dist/url-shortener /url-shortener
+COPY --from=builder /app/dist/pivotal /pivotal
 
 VOLUME ["/data"]
 
-ENV DB_PATH=/data/shortener.db
+ENV DB_PATH=/data/pivotal.db
 ENV PORT=3011
 
 EXPOSE 3011
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/url-shortener"]
+ENTRYPOINT ["/pivotal"]

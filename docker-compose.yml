@@ -1,10 +1,10 @@
 services:
-  url-shortener:
+  pivotal:
     build:
       context: .
       dockerfile: Dockerfile
-    image: huffmanks/url-shortener:${RELEASE_VERSION:-latest}
-    container_name: url-shortener
+    image: huffmanks/pivotal:${RELEASE_VERSION:-latest}
+    container_name: pivotal
     ports:
       - "${PORT:-3011}:${PORT:-3011}"
     environment:

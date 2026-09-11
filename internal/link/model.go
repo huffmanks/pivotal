@@ -25,3 +25,9 @@ type CreateLinkRequest struct {
 	DestinationURL string     `json:"destination_url"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 }
+
+type UpdateLinkRequest struct {
+	Slug           *string    `json:"slug,omitempty"`
+	DestinationURL *string    `json:"destination_url,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+}

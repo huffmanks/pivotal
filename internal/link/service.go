@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"url-shortener/internal/db"
+	"pivotal/internal/db"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -28,6 +28,8 @@ type Service interface {
 	Create(ctx context.Context, req CreateLinkRequest) (Link, error)
 	GetByID(ctx context.Context, id int64) (Link, error)
 	List(ctx context.Context) ([]Link, error)
+	Update(ctx context.Context, id int64, req UpdateLinkRequest) (Link, error)
+	Delete(ctx context.Context, id int64) error
 	Resolve(ctx context.Context, fullPath string) (Link, string, error)
 
 	RecordClick(event ClickEvent)
@@ -155,6 +157,84 @@ func (s *service) ListClicks(ctx context.Context, linkID int64) ([]ClickEvent, e
 
 func (s *service) Close() {
 	s.repo.Close()
+}
+
+func (s *service) Update(ctx context.Context, id int64, req UpdateLinkRequest) (Link, error) {
+	existing, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Link{}, err
+	}
+
+	dest := existing.DestinationURL
+	if req.DestinationURL != nil {
+		parsed, err := url.ParseRequestURI(*req.DestinationURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return Link{}, ErrInvalidURL
+		}
+		dest = *req.DestinationURL
+	}
+
+	slug := existing.Slug
+	isCustom := existing.IsCustom
+	if req.Slug != nil {
+		cleanSlug := strings.Trim(strings.TrimSpace(*req.Slug), "/")
+		if cleanSlug != existing.Slug {
+			if cleanSlug != "" && isReservedSlug(cleanSlug) {
+				return Link{}, ErrReservedSlug
+			}
+			slug = cleanSlug
+			isCustom = cleanSlug != ""
+		}
+	}
+
+	exp := existing.ExpiresAt
+	if req.ExpiresAt != nil {
+		exp = req.ExpiresAt
+	}
+
+	for {
+		if slug == "" {
+			var err error
+			slug, err = generateBase62ID(6)
+			if err != nil {
+				return Link{}, err
+			}
+		}
+
+		updated, found, err := s.repo.Update(ctx, id, slug, dest, isCustom, exp)
+		if err != nil {
+			if db.IsUniqueConstraintError(err) {
+				if isCustom {
+					return Link{}, ErrSlugExists
+				}
+				slug = ""
+				continue
+			}
+			return Link{}, err
+		}
+		if !found {
+			return Link{}, ErrNotFound
+		}
+
+		if existing.Slug != updated.Slug {
+			s.cache.Remove(existing.Slug)
+		}
+		s.cache.Add(updated.Slug, updated)
+		return updated, nil
+	}
+}
+
+func (s *service) Delete(ctx context.Context, id int64) error {
+	slug, found, err := s.repo.Delete(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrNotFound
+	}
+
+	s.cache.Remove(slug)
+	return nil
 }
 
 func generateBase62ID(length int) (string, error) {

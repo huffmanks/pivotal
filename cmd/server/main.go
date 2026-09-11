@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"url-shortener/internal/config"
-	"url-shortener/internal/db"
-	"url-shortener/internal/link"
-	"url-shortener/internal/server"
-	"url-shortener/web"
+	"pivotal/internal/config"
+	"pivotal/internal/db"
+	"pivotal/internal/link"
+	"pivotal/internal/server"
+	"pivotal/web"
 )
 
 func main() {

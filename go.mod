@@ -1,4 +1,4 @@
-module url-shortener
+module pivotal
 
 go 1.26.0
 

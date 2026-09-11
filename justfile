@@ -1,10 +1,10 @@
 set dotenv-load
 
-binary_name := "url-shortener"
-image_repo := "huffmanks/url-shortener"
+binary_name := "pivotal"
+image_repo := "huffmanks/pivotal"
 dist_path := "dist"
 version := "1.0.0"
-docker_builder := "url-shortener_builder"
+docker_builder := "pivotal_builder"
 
 set default-list := true
 

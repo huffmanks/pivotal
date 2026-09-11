@@ -4,8 +4,8 @@ import (
 	"io/fs"
 	"net/http"
 
-	"url-shortener/internal/link"
-	"url-shortener/internal/middleware"
+	"pivotal/internal/link"
+	"pivotal/internal/middleware"
 )
 
 type Server struct {
