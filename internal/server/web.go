@@ -21,18 +21,28 @@ func WebHandler(files fs.FS, linkSvc link.Service) http.Handler {
 		}
 
 		if l, extraPath, err := linkSvc.Resolve(r.Context(), cleanPath); err == nil {
+			if l.Status != link.LinkStatusActive {
+				if l.FallbackURL != "" {
+					recordClick(linkSvc, l, r)
+					http.Redirect(w, r, l.FallbackURL, getRedirectCode(l.RedirectType))
+					return
+				}
+				if l.Status == link.LinkStatusExpired {
+					http.Error(w, `{"error":"Link expired"}`, http.StatusGone)
+					return
+				}
+				http.Error(w, `{"error":"Link disabled"}`, http.StatusNotFound)
+				return
+			}
+
 			dest := l.DestinationURL
 			if extraPath != "" {
 				dest = strings.TrimSuffix(dest, "/") + "/" + strings.TrimPrefix(extraPath, "/")
 			}
 
-			linkSvc.RecordClick(link.ClickEvent{
-				LinkID:    l.ID,
-				Referer:   r.Referer(),
-				UserAgent: r.UserAgent(),
-			})
+			recordClick(linkSvc, l, r)
 
-			http.Redirect(w, r, dest, http.StatusFound)
+			http.Redirect(w, r, dest, getRedirectCode(l.RedirectType))
 			return
 		}
 
@@ -48,6 +58,21 @@ func WebHandler(files fs.FS, linkSvc link.Service) http.Handler {
 
 		serveFile(w, r, files, "200.html")
 	})
+}
+
+func recordClick(linkSvc link.Service, l link.Link, r *http.Request) {
+	linkSvc.RecordClick(link.ClickEvent{
+		LinkID:    l.ID,
+		Referer:   r.Referer(),
+		UserAgent: r.UserAgent(),
+	})
+}
+
+func getRedirectCode(redirectType string) int {
+	if redirectType == "301" {
+		return http.StatusMovedPermanently
+	}
+	return http.StatusFound
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request, files fs.FS, name string) {

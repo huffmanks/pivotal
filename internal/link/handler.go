@@ -22,6 +22,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/links/{id}", h.handleGetLink)
 	mux.HandleFunc("PUT /api/links/{id}", h.handleUpdateLink)
 	mux.HandleFunc("DELETE /api/links/{id}", h.handleDeleteLink)
+	mux.HandleFunc("PATCH /api/links/{id}/disable", h.handleDisableLink)
+	mux.HandleFunc("PATCH /api/links/{id}/enable", h.handleEnableLink)
 	mux.HandleFunc("GET /api/links/{id}/clicks", h.handleListClicks)
 	mux.HandleFunc("GET /api/links/{id}/clicks/{clickID}", h.handleGetClick)
 }
@@ -166,4 +168,50 @@ func (h *Handler) handleDeleteLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleDisableLink(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid link ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req DisableLinkRequest
+	if err := utils.ParseJSON(w, r, &req); err != nil {
+		http.Error(w, `{"error":"Invalid payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	updated, err := h.service.Disable(r.Context(), id, req.FallbackURL)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, `{"error":"Link not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) handleEnableLink(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid link ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	updated, err := h.service.Enable(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, `{"error":"Link not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, updated)
 }

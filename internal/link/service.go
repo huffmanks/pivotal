@@ -15,6 +15,11 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
+const (
+	httpStatusFound          = 302
+	httpStatusMovedPermanently = 301
+)
+
 const base62Chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 var (
@@ -31,10 +36,13 @@ type Service interface {
 	Update(ctx context.Context, id int64, req UpdateLinkRequest) (Link, error)
 	Delete(ctx context.Context, id int64) error
 	Resolve(ctx context.Context, fullPath string) (Link, string, error)
+	ResolveWithRedirect(ctx context.Context, fullPath string) (Link, string, int, error)
 
 	RecordClick(event ClickEvent)
 	GetClickByID(ctx context.Context, id int64) (ClickEvent, error)
 	ListClicks(ctx context.Context, linkID int64) ([]ClickEvent, error)
+	Disable(ctx context.Context, id int64, fallbackURL *string) (Link, error)
+	Enable(ctx context.Context, id int64) (Link, error)
 	Close()
 }
 
@@ -57,11 +65,23 @@ func (s *service) Create(ctx context.Context, req CreateLinkRequest) (Link, erro
 		return Link{}, ErrInvalidURL
 	}
 
+	title := strings.TrimSpace(req.Title)
+
+	redirectType := "302"
+	if req.RedirectType != nil && *req.RedirectType == "301" {
+		redirectType = "301"
+	}
+
 	slug := strings.Trim(strings.TrimSpace(req.Slug), "/")
 	isCustom := slug != ""
 
 	if isCustom && isReservedSlug(slug) {
 		return Link{}, ErrReservedSlug
+	}
+
+	fallbackURL := ""
+	if req.FallbackURL != nil {
+		fallbackURL = *req.FallbackURL
 	}
 
 	for {
@@ -73,7 +93,7 @@ func (s *service) Create(ctx context.Context, req CreateLinkRequest) (Link, erro
 			}
 		}
 
-		created, err := s.repo.Create(ctx, slug, req.DestinationURL, isCustom, req.ExpiresAt)
+		created, err := s.repo.Create(ctx, slug, req.DestinationURL, title, isCustom, req.ExpiresAt, redirectType, fallbackURL)
 		if err == nil {
 			s.cache.Add(created.Slug, created)
 			return created, nil
@@ -98,6 +118,7 @@ func (s *service) GetByID(ctx context.Context, id int64) (Link, error) {
 	if !found {
 		return Link{}, ErrNotFound
 	}
+	updateStatus(&l)
 	return l, nil
 }
 
@@ -107,7 +128,9 @@ func (s *service) List(ctx context.Context) ([]Link, error) {
 
 func (s *service) Resolve(ctx context.Context, fullPath string) (Link, string, error) {
 	if l, ok := s.cache.Get(fullPath); ok {
-		if l.ExpiresAt == nil || l.ExpiresAt.After(time.Now()) {
+		if l.Status == LinkStatusActive || l.Status == LinkStatusDisabled {
+			updateStatus(&l)
+			s.cache.Add(fullPath, l)
 			return l, "", nil
 		}
 		s.cache.Remove(fullPath)
@@ -121,9 +144,9 @@ func (s *service) Resolve(ctx context.Context, fullPath string) (Link, string, e
 		}
 
 		if found {
-			extraPath := strings.TrimPrefix(fullPath, currentPath)
+			updateStatus(&l)
 			s.cache.Add(currentPath, l)
-			return l, extraPath, nil
+			return l, "", nil
 		}
 
 		idx := strings.LastIndex(currentPath, "/")
@@ -134,6 +157,26 @@ func (s *service) Resolve(ctx context.Context, fullPath string) (Link, string, e
 	}
 
 	return Link{}, "", ErrNotFound
+}
+
+func (s *service) ResolveWithRedirect(ctx context.Context, fullPath string) (Link, string, int, error) {
+	link, _, err := s.Resolve(ctx, fullPath)
+	if err != nil {
+		return Link{}, "", httpStatusFound, err
+	}
+
+	redirectType := httpStatusFound
+	if link.RedirectType == "301" {
+		redirectType = httpStatusMovedPermanently
+	}
+
+	if link.Status != LinkStatusActive {
+		if link.FallbackURL != "" {
+			return link, link.FallbackURL, redirectType, nil
+		}
+	}
+
+	return link, link.DestinationURL, redirectType, nil
 }
 
 func (s *service) RecordClick(event ClickEvent) {
@@ -155,6 +198,33 @@ func (s *service) ListClicks(ctx context.Context, linkID int64) ([]ClickEvent, e
 	return s.repo.ListClicksByLinkID(ctx, linkID)
 }
 
+func (s *service) Disable(ctx context.Context, id int64, fallbackURL *string) (Link, error) {
+	updated, found, err := s.repo.Disable(ctx, id, fallbackURL)
+	if err != nil {
+		return Link{}, err
+	}
+	if !found {
+		return Link{}, ErrNotFound
+	}
+
+	s.cache.Remove(updated.Slug)
+	return updated, nil
+}
+
+func (s *service) Enable(ctx context.Context, id int64) (Link, error) {
+	updated, found, err := s.repo.Enable(ctx, id)
+	if err != nil {
+		return Link{}, err
+	}
+	if !found {
+		return Link{}, ErrNotFound
+	}
+
+	s.cache.Remove(updated.Slug)
+	s.cache.Add(updated.Slug, updated)
+	return updated, nil
+}
+
 func (s *service) Close() {
 	s.repo.Close()
 }
@@ -172,6 +242,11 @@ func (s *service) Update(ctx context.Context, id int64, req UpdateLinkRequest) (
 			return Link{}, ErrInvalidURL
 		}
 		dest = *req.DestinationURL
+	}
+
+	title := existing.Title
+	if req.Title != nil {
+		title = strings.TrimSpace(*req.Title)
 	}
 
 	slug := existing.Slug
@@ -192,6 +267,16 @@ func (s *service) Update(ctx context.Context, id int64, req UpdateLinkRequest) (
 		exp = req.ExpiresAt
 	}
 
+	redirectType := existing.RedirectType
+	if req.RedirectType != nil && *req.RedirectType == "301" {
+		redirectType = "301"
+	}
+
+	fallbackURL := existing.FallbackURL
+	if req.FallbackURL != nil {
+		fallbackURL = *req.FallbackURL
+	}
+
 	for {
 		if slug == "" {
 			var err error
@@ -201,7 +286,7 @@ func (s *service) Update(ctx context.Context, id int64, req UpdateLinkRequest) (
 			}
 		}
 
-		updated, found, err := s.repo.Update(ctx, id, slug, dest, isCustom, exp)
+		updated, found, err := s.repo.Update(ctx, id, slug, dest, title, isCustom, exp, redirectType, fallbackURL)
 		if err != nil {
 			if db.IsUniqueConstraintError(err) {
 				if isCustom {
@@ -248,6 +333,15 @@ func generateBase62ID(length int) (string, error) {
 		b[i] = base62Chars[n.Int64()]
 	}
 	return string(b), nil
+}
+
+func updateStatus(l *Link) {
+	if l.Status == LinkStatusDisabled {
+		return
+	}
+	if l.ExpiresAt != nil && l.ExpiresAt.Before(time.Now()) {
+		l.Status = LinkStatusExpired
+	}
 }
 
 func isReservedSlug(slug string) bool {

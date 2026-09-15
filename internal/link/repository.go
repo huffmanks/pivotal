@@ -7,12 +7,14 @@ import (
 )
 
 type Repository interface {
-	Create(ctx context.Context, slug, dest string, isCustom bool, exp *time.Time) (Link, error)
+	Create(ctx context.Context, slug, dest, title string, isCustom bool, exp *time.Time, redirectType, fallbackURL string) (Link, error)
 	GetByID(ctx context.Context, id int64) (Link, bool, error)
 	GetBySlug(ctx context.Context, slug string) (Link, bool, error)
 	List(ctx context.Context) ([]Link, error)
-	Update(ctx context.Context, id int64, slug, dest string, isCustom bool, exp *time.Time) (Link, bool, error)
+	Update(ctx context.Context, id int64, slug, dest, title string, isCustom bool, exp *time.Time, redirectType, fallbackURL string) (Link, bool, error)
 	Delete(ctx context.Context, id int64) (string, bool, error)
+	Disable(ctx context.Context, id int64, fallbackURL *string) (Link, bool, error)
+	Enable(ctx context.Context, id int64) (Link, bool, error)
 
 	RecordClick(event ClickEvent)
 	GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error)
@@ -32,15 +34,16 @@ func NewRepository(database *sql.DB) Repository {
 	}
 }
 
-func (r *sqliteRepository) Create(ctx context.Context, slug, dest string, isCustom bool, exp *time.Time) (Link, error) {
+func (r *sqliteRepository) Create(ctx context.Context, slug, dest, title string, isCustom bool, exp *time.Time, redirectType, fallbackURL string) (Link, error) {
 	query := `
-        INSERT INTO links (slug, destination_url, is_custom, expires_at)
-        VALUES (?, ?, ?, ?)
-        RETURNING id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        INSERT INTO links (slug, destination_url, title, is_custom, expires_at, redirect_type, fallback_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id, slug, destination_url, title, is_custom, click_count, created_at, expires_at, status, disabled_at, enabled_at, redirect_type, fallback_url
     `
 	var l Link
-	err := r.db.QueryRowContext(ctx, query, slug, dest, isCustom, exp).Scan(
-		&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+	err := r.db.QueryRowContext(ctx, query, slug, dest, title, isCustom, exp, redirectType, fallbackURL).Scan(
+		&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+		&l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL,
 	)
 	return l, err
 }
@@ -48,9 +51,11 @@ func (r *sqliteRepository) Create(ctx context.Context, slug, dest string, isCust
 func (r *sqliteRepository) GetByID(ctx context.Context, id int64) (Link, bool, error) {
 	var l Link
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        SELECT id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+               status, disabled_at, enabled_at, redirect_type, fallback_url
         FROM links WHERE id = ?
-    `, id).Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt)
+    `, id).Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt,
+		&l.ExpiresAt, &l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL)
 
 	if err == sql.ErrNoRows {
 		return Link{}, false, nil
@@ -61,9 +66,11 @@ func (r *sqliteRepository) GetByID(ctx context.Context, id int64) (Link, bool, e
 func (r *sqliteRepository) GetBySlug(ctx context.Context, slug string) (Link, bool, error) {
 	var l Link
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
-        FROM links WHERE slug = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-    `, slug).Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt)
+        SELECT id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+               status, disabled_at, enabled_at, redirect_type, fallback_url
+        FROM links WHERE slug = ?
+    `, slug).Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt,
+		&l.ExpiresAt, &l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL)
 
 	if err == sql.ErrNoRows {
 		return Link{}, false, nil
@@ -73,7 +80,8 @@ func (r *sqliteRepository) GetBySlug(ctx context.Context, slug string) (Link, bo
 
 func (r *sqliteRepository) List(ctx context.Context) ([]Link, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, slug, destination_url, is_custom, click_count, created_at, expires_at
+        SELECT id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+               status, disabled_at, enabled_at, redirect_type, fallback_url
         FROM links ORDER BY id DESC
     `)
 	if err != nil {
@@ -84,7 +92,8 @@ func (r *sqliteRepository) List(ctx context.Context) ([]Link, error) {
 	var links []Link
 	for rows.Next() {
 		var l Link
-		if err := rows.Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt,
+			&l.ExpiresAt, &l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL); err != nil {
 			return nil, err
 		}
 		links = append(links, l)
@@ -133,16 +142,18 @@ func (r *sqliteRepository) Close() {
 	r.clicks.close()
 }
 
-func (r *sqliteRepository) Update(ctx context.Context, id int64, slug, dest string, isCustom bool, exp *time.Time) (Link, bool, error) {
+func (r *sqliteRepository) Update(ctx context.Context, id int64, slug, dest, title string, isCustom bool, exp *time.Time, redirectType, fallbackURL string) (Link, bool, error) {
 	query := `
 		UPDATE links
-		SET slug = ?, destination_url = ?, is_custom = ?, expires_at = ?
+		SET slug = ?, destination_url = ?, title = ?, is_custom = ?, expires_at = ?, redirect_type = ?, fallback_url = ?
 		WHERE id = ?
-		RETURNING id, slug, destination_url, is_custom, click_count, created_at, expires_at
+		RETURNING id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+		          status, disabled_at, enabled_at, redirect_type, fallback_url
 	`
 	var l Link
-	err := r.db.QueryRowContext(ctx, query, slug, dest, isCustom, exp, id).Scan(
-		&l.ID, &l.Slug, &l.DestinationURL, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+	err := r.db.QueryRowContext(ctx, query, slug, dest, title, isCustom, exp, redirectType, fallbackURL, id).Scan(
+		&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+		&l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL,
 	)
 	if err == sql.ErrNoRows {
 		return Link{}, false, nil
@@ -157,4 +168,58 @@ func (r *sqliteRepository) Delete(ctx context.Context, id int64) (string, bool, 
 		return "", false, nil
 	}
 	return slug, err == nil, err
+}
+
+func (r *sqliteRepository) Disable(ctx context.Context, id int64, fallbackURL *string) (Link, bool, error) {
+	if fallbackURL != nil && *fallbackURL != "" {
+		query := `
+			UPDATE links SET status = 'disabled', disabled_at = CURRENT_TIMESTAMP, fallback_url = ?
+			WHERE id = ?
+			RETURNING id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+			          status, disabled_at, enabled_at, redirect_type, fallback_url
+		`
+		var l Link
+		err := r.db.QueryRowContext(ctx, query, *fallbackURL, id).Scan(
+			&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+			&l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL,
+		)
+		if err == sql.ErrNoRows {
+			return Link{}, false, nil
+		}
+		return l, err == nil, err
+	}
+
+	query := `
+		UPDATE links SET status = 'disabled', disabled_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+		RETURNING id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+		          status, disabled_at, enabled_at, redirect_type, fallback_url
+	`
+	var l Link
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+		&l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL,
+	)
+	if err == sql.ErrNoRows {
+		return Link{}, false, nil
+	}
+	return l, err == nil, err
+}
+
+func (r *sqliteRepository) Enable(ctx context.Context, id int64) (Link, bool, error) {
+	query := `
+		UPDATE links SET status = 'active', enabled_at = CURRENT_TIMESTAMP, disabled_at = NULL
+		WHERE id = ?
+		RETURNING id, slug, destination_url, title, is_custom, click_count, created_at, expires_at,
+		          status, disabled_at, enabled_at, redirect_type, fallback_url
+	`
+	var l Link
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&l.ID, &l.Slug, &l.DestinationURL, &l.Title, &l.IsCustom, &l.ClickCount, &l.CreatedAt, &l.ExpiresAt,
+		&l.Status, &l.DisabledAt, &l.EnabledAt, &l.RedirectType, &l.FallbackURL,
+	)
+	if err == sql.ErrNoRows {
+		return Link{}, false, nil
+	}
+	return l, err == nil, err
 }

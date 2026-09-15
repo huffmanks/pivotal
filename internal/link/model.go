@@ -2,14 +2,28 @@ package link
 
 import "time"
 
+type LinkStatus string
+
+const (
+	LinkStatusActive   LinkStatus = "active"
+	LinkStatusDisabled LinkStatus = "disabled"
+	LinkStatusExpired  LinkStatus = "expired"
+)
+
 type Link struct {
-	ID             int64      `json:"id"`
-	Slug           string     `json:"slug"`
-	DestinationURL string     `json:"destination_url"`
-	IsCustom       bool       `json:"is_custom"`
-	ClickCount     int64      `json:"click_count"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	ID             int64      `json:"id" db:"id"`
+	Slug           string     `json:"slug" db:"slug"`
+	DestinationURL string     `json:"destination_url" db:"destination_url"`
+	Title          string     `json:"title" db:"title"`
+	IsCustom       bool       `json:"is_custom" db:"is_custom"`
+	ClickCount     int64      `json:"click_count" db:"click_count"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	Status         LinkStatus `json:"status" db:"status"`
+	DisabledAt     *time.Time `json:"disabled_at,omitempty" db:"disabled_at"`
+	EnabledAt      *time.Time `json:"enabled_at,omitempty" db:"enabled_at"`
+	RedirectType   string     `json:"redirect_type" db:"redirect_type"`
+	FallbackURL    string     `json:"fallback_url,omitempty" db:"fallback_url"`
 }
 
 type ClickEvent struct {
@@ -21,13 +35,27 @@ type ClickEvent struct {
 }
 
 type CreateLinkRequest struct {
-	Slug           string     `json:"slug,omitempty"`
-	DestinationURL string     `json:"destination_url"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	Slug           string      `json:"slug,omitempty"`
+	DestinationURL string      `json:"destination_url"`
+	Title          string      `json:"title,omitempty"`
+	ExpiresAt      *time.Time  `json:"expires_at,omitempty"`
+	RedirectType   *string     `json:"redirect_type,omitempty"`
+	FallbackURL    *string     `json:"fallback_url,omitempty"`
+	Status         *LinkStatus `json:"status,omitempty"`
 }
 
 type UpdateLinkRequest struct {
-	Slug           *string    `json:"slug,omitempty"`
-	DestinationURL *string    `json:"destination_url,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	Slug           *string     `json:"slug,omitempty"`
+	DestinationURL *string     `json:"destination_url,omitempty"`
+	Title          *string     `json:"title,omitempty"`
+	ExpiresAt      *time.Time  `json:"expires_at,omitempty"`
+	RedirectType   *string     `json:"redirect_type,omitempty"`
+	FallbackURL    *string     `json:"fallback_url,omitempty"`
+	Status         *LinkStatus `json:"status,omitempty"`
 }
+
+type DisableLinkRequest struct {
+	FallbackURL *string `json:"fallback_url,omitempty"`
+}
+
+type EnableLinkRequest struct{}
