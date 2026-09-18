@@ -18,7 +18,5 @@ A lightweight URL shortener with a Go backend, SQLite database, and Svelte front
 - Preserve existing behavior unless the current task requires otherwise.
 - Add new migrations instead of modifying existing ones.
 - Keep redirect handling fast.
-- Implement phases in order.
-- Use `IMPLEMENTATION_PLAN.md` as the source of truth for the current phase.
-- Do not implement later-phase requirements early.
+- Use `docs/implementation-plan/INSTRUCTIONS.md` as the entrypoint and source of truth for the current phase.
 - Run relevant tests after completing each phase.

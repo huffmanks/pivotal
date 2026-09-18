@@ -19,13 +19,13 @@ func TestClickTracker_ConcurrencyAndShutdown(t *testing.T) {
 	var wg sync.WaitGroup
 	startSignal := make(chan struct{})
 
-	for i := 0; i < numWorkers; i++ {
+	for workerID := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 			<-startSignal
 
-			for j := 0; j < clicksPerWorker; j++ {
+			for range clicksPerWorker {
 				tracker.record(ClickEvent{
 					LinkID:    1,
 					Referer:   fmt.Sprintf("http://example.com/%d", workerID),
@@ -33,7 +33,7 @@ func TestClickTracker_ConcurrencyAndShutdown(t *testing.T) {
 					ClickedAt: time.Now(),
 				})
 			}
-		}(i)
+		}(workerID)
 	}
 
 	close(startSignal)

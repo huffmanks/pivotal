@@ -19,7 +19,6 @@ func TestLinkService_Create(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test basic creation
 	link, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -34,7 +33,6 @@ func TestLinkService_Create(t *testing.T) {
 		t.Errorf("expected redirect type 302, got %q", link.RedirectType)
 	}
 
-	// Test creation with title
 	link2, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com/about", Title: "About Page"})
 	if err != nil {
 		t.Fatalf("Create with title failed: %v", err)
@@ -43,10 +41,9 @@ func TestLinkService_Create(t *testing.T) {
 		t.Errorf("expected title %q, got %q", "About Page", link2.Title)
 	}
 
-	// Test creation with 301 redirect
 	link3, err := svc.Create(ctx, CreateLinkRequest{
 		DestinationURL: "https://example.com",
-		RedirectType:   strPtr("301"),
+		RedirectType:   new("301"),
 	})
 	if err != nil {
 		t.Fatalf("Create with 301 failed: %v", err)
@@ -55,10 +52,9 @@ func TestLinkService_Create(t *testing.T) {
 		t.Errorf("expected redirect type 301, got %q", link3.RedirectType)
 	}
 
-	// Test creation with fallback URL
 	link4, err := svc.Create(ctx, CreateLinkRequest{
 		DestinationURL: "https://example.com",
-		FallbackURL:    strPtr("https://fallback.com"),
+		FallbackURL:    new("https://fallback.com"),
 	})
 	if err != nil {
 		t.Fatalf("Create with fallback failed: %v", err)
@@ -67,7 +63,6 @@ func TestLinkService_Create(t *testing.T) {
 		t.Errorf("expected fallback URL %q, got %q", "https://fallback.com", link4.FallbackURL)
 	}
 
-	// Test invalid URL
 	_, err = svc.Create(ctx, CreateLinkRequest{DestinationURL: "not-a-url"})
 	if !errors.Is(err, ErrInvalidURL) {
 		t.Errorf("expected ErrInvalidURL, got %v", err)
@@ -86,8 +81,7 @@ func TestLinkService_Update(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	// Test updating destination URL
-	updated, err := svc.Update(ctx, link.ID, UpdateLinkRequest{DestinationURL: strPtr("https://newdestination.com")})
+	updated, err := svc.Update(ctx, link.ID, UpdateLinkRequest{DestinationURL: new("https://newdestination.com")})
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
@@ -95,8 +89,7 @@ func TestLinkService_Update(t *testing.T) {
 		t.Errorf("expected destination %q, got %q", "https://newdestination.com", updated.DestinationURL)
 	}
 
-	// Test updating title
-	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{Title: strPtr("New Title")})
+	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{Title: new("New Title")})
 	if err != nil {
 		t.Fatalf("Update title failed: %v", err)
 	}
@@ -104,8 +97,7 @@ func TestLinkService_Update(t *testing.T) {
 		t.Errorf("expected title %q, got %q", "New Title", updated.Title)
 	}
 
-	// Test updating redirect type
-	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{RedirectType: strPtr("301")})
+	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{RedirectType: new("301")})
 	if err != nil {
 		t.Fatalf("Update redirect type failed: %v", err)
 	}
@@ -113,8 +105,7 @@ func TestLinkService_Update(t *testing.T) {
 		t.Errorf("expected redirect type 301, got %q", updated.RedirectType)
 	}
 
-	// Test updating fallback URL
-	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{FallbackURL: strPtr("https://fallback.com")})
+	updated, err = svc.Update(ctx, link.ID, UpdateLinkRequest{FallbackURL: new("https://fallback.com")})
 	if err != nil {
 		t.Fatalf("Update fallback failed: %v", err)
 	}
@@ -135,7 +126,6 @@ func TestLinkService_DisableEnable(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	// Test disable
 	disabled, err := svc.Disable(ctx, link.ID, nil)
 	if err != nil {
 		t.Fatalf("Disable failed: %v", err)
@@ -144,8 +134,7 @@ func TestLinkService_DisableEnable(t *testing.T) {
 		t.Errorf("expected status %q, got %q", LinkStatusDisabled, disabled.Status)
 	}
 
-	// Test disable with fallback
-	disabled2, err := svc.Disable(ctx, link.ID, strPtr("https://fallback.com"))
+	disabled2, err := svc.Disable(ctx, link.ID, new("https://fallback.com"))
 	if err != nil {
 		t.Fatalf("Disable with fallback failed: %v", err)
 	}
@@ -156,7 +145,6 @@ func TestLinkService_DisableEnable(t *testing.T) {
 		t.Errorf("expected status %q, got %q", LinkStatusDisabled, disabled2.Status)
 	}
 
-	// Test enable
 	enabled, err := svc.Enable(ctx, link.ID)
 	if err != nil {
 		t.Fatalf("Enable failed: %v", err)
@@ -173,7 +161,6 @@ func TestLinkService_Resolve(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Active link should resolve
 	activeLink, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -187,7 +174,6 @@ func TestLinkService_Resolve(t *testing.T) {
 		t.Errorf("expected status %q, got %q", LinkStatusActive, resolved.Status)
 	}
 
-	// Disabled link should resolve with disabled status
 	svc.Disable(ctx, activeLink.ID, nil)
 	resolved, _, err = svc.Resolve(ctx, activeLink.Slug)
 	if err != nil {
@@ -205,10 +191,9 @@ func TestLinkService_ResolveWithRedirect(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Active link with 301 redirect
 	link301, err := svc.Create(ctx, CreateLinkRequest{
 		DestinationURL: "https://example.com",
-		RedirectType:   strPtr("301"),
+		RedirectType:   new("301"),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -228,7 +213,6 @@ func TestLinkService_ResolveWithRedirect(t *testing.T) {
 		t.Errorf("expected destination %q, got %q", "https://example.com", dest)
 	}
 
-	// Active link with 302 redirect
 	link302, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -245,8 +229,7 @@ func TestLinkService_ResolveWithRedirect(t *testing.T) {
 		t.Errorf("expected destination %q, got %q", "https://example.com", dest)
 	}
 
-	// Disabled link with fallback - should redirect to fallback
-	svc.Disable(ctx, link302.ID, strPtr("https://fallback.com"))
+	svc.Disable(ctx, link302.ID, new("https://fallback.com"))
 	l, dest, code, err = svc.ResolveWithRedirect(ctx, link302.Slug)
 	if err != nil {
 		t.Fatalf("ResolveWithRedirect disabled+fallback failed: %v", err)
@@ -258,10 +241,10 @@ func TestLinkService_ResolveWithRedirect(t *testing.T) {
 		t.Errorf("expected fallback %q, got %q", "https://fallback.com", dest)
 	}
 
-	// Disabled link without fallback but with configured fallback on link
 	svc.Disable(ctx, link301.ID, nil)
-	link301.FallbackURL = "https://fallback.com"
-	svc.Update(ctx, link301.ID, UpdateLinkRequest{FallbackURL: strPtr("https://fallback.com")})
+
+	svc.Update(ctx, link301.ID, UpdateLinkRequest{FallbackURL: new("https://fallback.com")})
+	svc.Update(ctx, link301.ID, UpdateLinkRequest{FallbackURL: new("https://fallback.com")})
 	l, dest, code, err = svc.ResolveWithRedirect(ctx, link301.Slug)
 	if err != nil {
 		t.Fatalf("ResolveWithRedirect disabled with fallback failed: %v", err)
@@ -293,7 +276,6 @@ func TestLinkService_Delete(t *testing.T) {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	// Should return not found after delete
 	_, err = svc.GetByID(ctx, link.ID)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound after delete, got %v", err)
@@ -325,7 +307,148 @@ func TestLinkService_Expiry(t *testing.T) {
 	}
 }
 
+func TestLinkService_ResolveWithRedirect_ExpiredWithoutFallback(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
 
+	ctx := context.Background()
+
+	expiredTime := time.Now().Add(-time.Hour)
+	link, err := svc.Create(ctx, CreateLinkRequest{
+		DestinationURL: "https://example.com",
+		ExpiresAt:      &expiredTime,
+	})
+	if err != nil {
+		t.Fatalf("Create expired link failed: %v", err)
+	}
+
+	l, dest, code, err := svc.ResolveWithRedirect(ctx, link.Slug)
+	if err != nil {
+		t.Fatalf("ResolveWithRedirect expired without fallback failed: %v", err)
+	}
+	if l.Status != LinkStatusExpired {
+		t.Errorf("expected status %q, got %q", LinkStatusExpired, l.Status)
+	}
+	if dest != "https://example.com" {
+		t.Errorf("expected destination %q, got %q", "https://example.com", dest)
+	}
+	if code != httpStatusFound {
+		t.Errorf("expected 302, got %d", code)
+	}
+}
+
+func TestLinkService_ResolveWithRedirect_ExpiredWithFallback(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	expiredTime := time.Now().Add(-time.Hour)
+	link, err := svc.Create(ctx, CreateLinkRequest{
+		DestinationURL: "https://example.com",
+		ExpiresAt:      &expiredTime,
+		FallbackURL:    new("https://fallback.com"),
+	})
+	if err != nil {
+		t.Fatalf("Create expired link failed: %v", err)
+	}
+
+	l, dest, _, err := svc.ResolveWithRedirect(ctx, link.Slug)
+	if err != nil {
+		t.Fatalf("ResolveWithRedirect expired with fallback failed: %v", err)
+	}
+	if l.Status != LinkStatusExpired {
+		t.Errorf("expected status %q, got %q", LinkStatusExpired, l.Status)
+	}
+	if dest != "https://fallback.com" {
+		t.Errorf("expected fallback %q, got %q", "https://fallback.com", dest)
+	}
+}
+
+func TestLinkService_ResolveWithRedirect_DisabledWithoutFallback(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	link, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	svc.Disable(ctx, link.ID, nil)
+
+	l, dest, code, err := svc.ResolveWithRedirect(ctx, link.Slug)
+	if err != nil {
+		t.Fatalf("ResolveWithRedirect disabled without fallback failed: %v", err)
+	}
+	if l.Status != LinkStatusDisabled {
+		t.Errorf("expected status %q, got %q", LinkStatusDisabled, l.Status)
+	}
+	if dest != "https://example.com" {
+		t.Errorf("expected destination %q, got %q", "https://example.com", dest)
+	}
+	if code != httpStatusFound {
+		t.Errorf("expected 302, got %d", code)
+	}
+}
+
+func TestLinkService_ResolveWithRedirect_DisabledWithConfiguredFallback(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	link, err := svc.Create(ctx, CreateLinkRequest{
+		DestinationURL: "https://example.com",
+		FallbackURL:    new("https://myfallback.com"),
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	svc.Disable(ctx, link.ID, nil)
+
+	l, dest, _, err := svc.ResolveWithRedirect(ctx, link.Slug)
+	if err != nil {
+		t.Fatalf("ResolveWithRedirect disabled with configured fallback failed: %v", err)
+	}
+	if l.Status != LinkStatusDisabled {
+		t.Errorf("expected status %q, got %q", LinkStatusDisabled, l.Status)
+	}
+	if dest != "https://myfallback.com" {
+		t.Errorf("expected fallback %q, got %q", "https://myfallback.com", dest)
+	}
+}
+
+func TestLinkService_Resolve_ExpiredLink(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	expiredTime := time.Now().Add(-time.Hour)
+	link, err := svc.Create(ctx, CreateLinkRequest{
+		DestinationURL: "https://example.com",
+		ExpiresAt:      &expiredTime,
+	})
+	if err != nil {
+		t.Fatalf("Create expired link failed: %v", err)
+	}
+
+	resolved, _, err := svc.Resolve(ctx, link.Slug)
+	if err != nil {
+		t.Fatalf("Resolve expired link failed: %v", err)
+	}
+	if resolved.Status != LinkStatusExpired {
+		t.Errorf("expected status %q, got %q", LinkStatusExpired, resolved.Status)
+	}
+}
 
 func setupClickDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -393,8 +516,4 @@ func setupFullTest(t *testing.T) (*sql.DB, *service) {
 	svc := &service{repo: repo, cache: cache}
 
 	return db, svc
-}
-
-func strPtr(s string) *string {
-	return &s
 }
