@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 
+	"pivotal/internal/job"
 	"pivotal/internal/link"
 	"pivotal/internal/middleware"
 )
@@ -12,7 +13,7 @@ type Server struct {
 	handler http.Handler
 }
 
-func NewServer(linkSvc link.Service, webFS fs.FS) *Server {
+func NewServer(linkSvc link.Service, webFS fs.FS, jobMgr *job.Manager) *Server {
 	mux := http.NewServeMux()
 
 	linkHandler := link.NewHandler(linkSvc)

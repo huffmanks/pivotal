@@ -24,6 +24,16 @@ Jobs must be:
 
 Do not make redirect requests wait for background processing.
 
+Expose an API for monitoring and managing background jobs and queues, including:
+
+- Viewing active, pending, completed, and failed jobs.
+- Viewing queue status and worker status.
+- Manually triggering or retrying jobs.
+- Cancelling or stopping queued or running jobs where supported.
+- Clearing or managing failed/completed jobs where appropriate.
+
+The API should provide enough visibility and control to operate the job system without directly accessing its underlying storage or process.
+
 ### Phase 4 Completion
 
 - Jobs survive transient failures.
@@ -31,4 +41,5 @@ Do not make redirect requests wait for background processing.
 - Jobs can safely be rerun.
 - Failed jobs do not break normal redirects.
 - Existing asynchronous click processing remains reliable.
-- Tests cover retries, duplicate execution, failures, and graceful shutdown.
+- Jobs and queues can be monitored and managed through the API.
+- Tests cover retries, duplicate execution, failures, graceful shutdown, and job management.

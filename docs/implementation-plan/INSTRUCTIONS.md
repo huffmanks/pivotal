@@ -22,3 +22,5 @@ For every phase:
 - Treat `web/` as completely out of scope. Leave its contents unchanged.
 
 Proceed with `docs/implementation-plan/CURRENT_PHASE.md`
+
+Refer to `docs/implementation-plan/CURRENT_ERRORS.md` if any exist.

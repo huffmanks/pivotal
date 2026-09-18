@@ -12,6 +12,7 @@ import (
 
 	"pivotal/internal/config"
 	"pivotal/internal/db"
+	"pivotal/internal/job"
 	"pivotal/internal/link"
 	"pivotal/internal/server"
 	"pivotal/web"
@@ -33,12 +34,19 @@ func main() {
 	}
 	defer linkSvc.Close()
 
+	jobRepository := job.NewRepository(database)
+	jobExecutor := job.NewJobExecutor(linkSvc, jobRepository)
+	jobManager := job.NewManager(jobRepository, jobExecutor, 3)
+	jobManager.Start()
+
+	defer jobManager.Stop()
+
 	webFS, err := web.Assets()
 	if err != nil {
 		log.Fatalf("failed to load web assets: %v", err)
 	}
 
-	srv := server.NewServer(linkSvc, webFS)
+	srv := server.NewServer(linkSvc, webFS, jobManager)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Address(),
