@@ -27,7 +27,7 @@ func main() {
 	defer database.Close()
 
 	linkRepo := link.NewRepository(database, nil, nil)
-	linkSvc, err := link.NewService(linkRepo, cfg.CacheSize)
+	linkSvc, err := link.NewService(linkRepo, cfg.CacheSize, cfg.URL())
 	if err != nil {
 		log.Fatalf("failed to initialize link service: %v", err)
 	}

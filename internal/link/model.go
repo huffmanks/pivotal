@@ -26,6 +26,19 @@ type Link struct {
 	FallbackURL    string     `json:"fallback_url,omitempty" db:"fallback_url"`
 }
 
+type QRCode struct {
+	ID        int64     `json:"id" db:"id"`
+	LinkID    int64     `json:"link_id" db:"link_id"`
+	ShortURL  string    `json:"short_url" db:"short_url"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+type QRCodeResponse struct {
+	ID        int64     `json:"id"`
+	ShortURL  string    `json:"short_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type AggregatedClick struct {
 	Date    string `json:"date,omitempty"`
 	Browser string `json:"browser,omitempty"`
@@ -40,6 +53,7 @@ type AggregatedClick struct {
 type ClickEvent struct {
 	ID        int64             `json:"id"`
 	LinkID    int64             `json:"link_id"`
+	QRCodeID  *int64            `json:"-"`
 	Referer   string            `json:"referer"`
 	UserAgent string            `json:"user_agent"`
 	ClickedAt time.Time         `json:"clicked_at"`

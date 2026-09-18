@@ -464,7 +464,17 @@ func setupClickDB(t *testing.T) *sql.DB {
 			link_id INTEGER NOT NULL,
 			referer TEXT,
 			user_agent TEXT,
-			clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			browser TEXT,
+			os TEXT,
+			device TEXT,
+			country TEXT,
+			region TEXT,
+			city TEXT,
+			utm_params TEXT,
+			qr_scan INTEGER NOT NULL DEFAULT 0,
+			ip TEXT,
+			qr_code_id INTEGER
 		);
 		INSERT INTO links (id, click_count) VALUES (1, 0);
 	`)
@@ -504,8 +514,17 @@ func setupFullTest(t *testing.T) (*sql.DB, *service) {
 			link_id INTEGER NOT NULL REFERENCES links(id) ON DELETE CASCADE,
 			referer TEXT,
 			user_agent TEXT,
-			clicked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			clicked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			qr_code_id INTEGER
 		);
+		CREATE TABLE IF NOT EXISTS qr_codes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			link_id INTEGER NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+			short_url TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(link_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_qr_codes_link_id ON qr_codes(link_id);
 	`)
 	if err != nil {
 		t.Fatalf("failed to setup schema: %v", err)
@@ -513,7 +532,97 @@ func setupFullTest(t *testing.T) (*sql.DB, *service) {
 
 	repo := NewRepository(db, nil, nil)
 	cache, _ := lru.New[string, Link](100)
-	svc := &service{repo: repo, cache: cache}
+	svc := &service{repo: repo, cache: cache, baseURL: "http://localhost:3011"}
 
 	return db, svc
+}
+
+func TestLinkService_QRCode(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	link, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	qr, err := svc.GetQRCode(ctx, link.ID)
+	if err != nil {
+		t.Fatalf("GetQRCode failed: %v", err)
+	}
+	if qr.ShortURL == "" {
+		t.Errorf("expected non-empty short URL in QR code")
+	}
+	if qr.ID == 0 {
+		t.Errorf("expected non-zero QR code ID")
+	}
+
+	png, err := svc.GetQRCodeImage(ctx, link.ID)
+	if err != nil {
+		t.Fatalf("GetQRCodeImage failed: %v", err)
+	}
+	if len(png) == 0 {
+		t.Errorf("expected non-empty PNG image")
+	}
+}
+
+func TestLinkService_QRCode_DeleteLink(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	link, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	_, err = svc.GetQRCode(ctx, link.ID)
+	if err != nil {
+		t.Fatalf("GetQRCode before delete failed: %v", err)
+	}
+
+	if err := svc.Delete(ctx, link.ID); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	_, err = svc.GetQRCode(ctx, link.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestLinkService_QRCode_DestinationChange(t *testing.T) {
+	db, svc := setupFullTest(t)
+	defer db.Close()
+	defer svc.Close()
+
+	ctx := context.Background()
+
+	link, err := svc.Create(ctx, CreateLinkRequest{DestinationURL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	qr, err := svc.GetQRCode(ctx, link.ID)
+	if err != nil {
+		t.Fatalf("GetQRCode failed: %v", err)
+	}
+	originalShortURL := qr.ShortURL
+
+	if _, err := svc.Update(ctx, link.ID, UpdateLinkRequest{DestinationURL: new("https://newdestination.com")}); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	qr2, err := svc.GetQRCode(ctx, link.ID)
+	if err != nil {
+		t.Fatalf("GetQRCode after update failed: %v", err)
+	}
+	if qr2.ShortURL != originalShortURL {
+		t.Errorf("expected QR code short URL to remain unchanged after destination change")
+	}
 }

@@ -133,8 +133,8 @@ func (t *clickTracker) flush(batch []ClickEvent) error {
 	defer tx.Rollback()
 
 	stmtClick, err := tx.Prepare(`
-		INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip, qr_code_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -151,7 +151,13 @@ func (t *clickTracker) flush(batch []ClickEvent) error {
 
 	for _, click := range batch {
 		utmParamsJSON, _ := json.Marshal(click.UTMParams)
-		if _, err := stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt, click.Browser, click.OS, click.Device, click.Country, click.Region, click.City, utmParamsJSON, click.QRScan, click.IP); err != nil {
+		var qrCodeID any
+		if click.QRCodeID != nil {
+			qrCodeID = *click.QRCodeID
+		} else {
+			qrCodeID = nil
+		}
+		if _, err := stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt, click.Browser, click.OS, click.Device, click.Country, click.Region, click.City, utmParamsJSON, click.QRScan, click.IP, qrCodeID); err != nil {
 			return err
 		}
 		if _, err := stmtCount.Exec(click.LinkID); err != nil {

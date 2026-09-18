@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,13 +65,19 @@ func WebHandler(files fs.FS, linkSvc link.Service) http.Handler {
 
 func recordClick(linkSvc link.Service, l link.Link, r *http.Request) {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	linkSvc.RecordClick(link.ClickEvent{
+	clickEvent := link.ClickEvent{
 		LinkID:    l.ID,
 		Referer:   r.Referer(),
 		UserAgent: r.UserAgent(),
 		ClickedAt: time.Now(),
 		IP:        ip,
-	})
+	}
+	if qrID := r.URL.Query().Get("qr"); qrID != "" {
+		if id, err := strconv.ParseInt(qrID, 10, 64); err == nil {
+			clickEvent.QRCodeID = &id
+		}
+	}
+	linkSvc.RecordClick(clickEvent)
 }
 
 func getRedirectCode(redirectType string) int {

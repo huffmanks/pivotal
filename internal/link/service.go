@@ -13,10 +13,11 @@ import (
 	"pivotal/internal/db"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/skip2/go-qrcode"
 )
 
 const (
-	httpStatusFound          = 302
+	httpStatusFound            = 302
 	httpStatusMovedPermanently = 301
 )
 
@@ -44,19 +45,23 @@ type Service interface {
 	Disable(ctx context.Context, id int64, fallbackURL *string) (Link, error)
 	Enable(ctx context.Context, id int64) (Link, error)
 	Close()
+
+	GetQRCode(ctx context.Context, linkID int64) (QRCodeResponse, error)
+	GetQRCodeImage(ctx context.Context, linkID int64) ([]byte, error)
 }
 
 type service struct {
-	repo  Repository
-	cache *lru.Cache[string, Link]
+	repo    Repository
+	cache   *lru.Cache[string, Link]
+	baseURL string
 }
 
-func NewService(repo Repository, cacheSize int) (Service, error) {
+func NewService(repo Repository, cacheSize int, baseURL string) (Service, error) {
 	cache, err := lru.New[string, Link](cacheSize)
 	if err != nil {
 		return nil, err
 	}
-	return &service{repo: repo, cache: cache}, nil
+	return &service{repo: repo, cache: cache, baseURL: baseURL}, nil
 }
 
 func (s *service) Create(ctx context.Context, req CreateLinkRequest) (Link, error) {
@@ -96,6 +101,10 @@ func (s *service) Create(ctx context.Context, req CreateLinkRequest) (Link, erro
 		created, err := s.repo.Create(ctx, slug, req.DestinationURL, title, isCustom, req.ExpiresAt, redirectType, fallbackURL)
 		if err == nil {
 			s.cache.Add(created.Slug, created)
+			shortURL := s.baseURL + "/" + created.Slug + "?qr=" + fmt.Sprintf("%d", created.ID)
+			if _, qrErr := s.repo.CreateQRCode(ctx, created.ID, shortURL); qrErr != nil {
+				return Link{}, qrErr
+			}
 			return created, nil
 		}
 
@@ -318,8 +327,37 @@ func (s *service) Delete(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 
+	s.repo.DeleteQRCodeByLinkID(ctx, id)
 	s.cache.Remove(slug)
 	return nil
+}
+
+func (s *service) GetQRCode(ctx context.Context, linkID int64) (QRCodeResponse, error) {
+	qc, found, err := s.repo.GetQRCodeByLinkID(ctx, linkID)
+	if err != nil {
+		return QRCodeResponse{}, err
+	}
+	if !found {
+		return QRCodeResponse{}, ErrNotFound
+	}
+
+	return QRCodeResponse{
+		ID:        qc.ID,
+		ShortURL:  qc.ShortURL,
+		CreatedAt: qc.CreatedAt,
+	}, nil
+}
+
+func (s *service) GetQRCodeImage(ctx context.Context, linkID int64) ([]byte, error) {
+	qc, found, err := s.repo.GetQRCodeByLinkID(ctx, linkID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNotFound
+	}
+
+	return qrcode.Encode(qc.ShortURL, qrcode.Medium, 256)
 }
 
 func generateBase62ID(length int) (string, error) {

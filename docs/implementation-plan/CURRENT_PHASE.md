@@ -1,49 +1,34 @@
-## Phase 2 — Analytics Foundation
+## Phase 4 — Background Jobs & Link Automation
 
-Build the analytics/event tracking foundation before adding advanced routing or automation.
+Introduce the background processing needed for automation.
 
-Track, where available and appropriate:
+Implement a reliable queue/worker/cron/scheduled-job mechanism appropriate for the existing architecture.
 
-- Total visits/clicks.
-- Unique visitors.
-- Timestamp.
-- Referrer.
-- User agent.
-- Browser and version.
-- Operating system and version.
-- Device type.
-- Device model where reasonably available.
-- Country.
-- Region/state.
-- City where reasonably available.
-- HTTP status/result.
-- Destination.
-- Short link.
-- QR scan versus normal visit where distinguishable.
-- UTM parameters.
-- Routing rule used.
+Use it for:
 
-Do not collect or retain unnecessary sensitive information.
+- Expiring links.
+- Enforcing visit limits.
+- Enforcing unique-visitor limits.
+- Enforcing QR-scan limits.
+- Periodic link health checks.
+- Refreshing URL metadata.
+- Processing scheduled routing changes.
+- Sending notifications.
 
-The analytics system should support aggregation by:
+Jobs must be:
 
-- Link.
-- Date/time.
-- Referrer.
-- Device.
-- Country/region.
-- Campaign.
-- UTM parameters.
-- QR versus normal visits.
+- Retryable.
+- Idempotent where possible.
+- Safe to run multiple times.
+- Non-blocking to normal redirects.
 
-Make analytics available in the dashboard.
+Do not make redirect requests wait for background processing.
 
-### Phase 2 Completion
+### Phase 4 Completion
 
-- Analytics are recorded reliably without unnecessarily slowing redirects.
-- Existing asynchronous/background click processing is reused or extended where appropriate.
-- Analytics data has a clear, extensible event model.
-- Aggregations needed by the dashboard are supported.
-- Privacy-conscious data collection is enforced.
-- Existing links and redirects continue to work.
-- Tests cover event recording, aggregation, missing metadata, and failure handling.
+- Jobs survive transient failures.
+- Retries do not create duplicate side effects.
+- Jobs can safely be rerun.
+- Failed jobs do not break normal redirects.
+- Existing asynchronous click processing remains reliable.
+- Tests cover retries, duplicate execution, failures, and graceful shutdown.

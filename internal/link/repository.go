@@ -21,6 +21,11 @@ type Repository interface {
 	Disable(ctx context.Context, id int64, fallbackURL *string) (Link, bool, error)
 	Enable(ctx context.Context, id int64) (Link, bool, error)
 
+	CreateQRCode(ctx context.Context, linkID int64, shortURL string) (QRCode, error)
+	GetQRCodeByLinkID(ctx context.Context, linkID int64) (QRCode, bool, error)
+	DeleteQRCodeByLinkID(ctx context.Context, linkID int64) error
+	GetQRCodeByID(ctx context.Context, id int64) (QRCode, bool, error)
+
 	RecordClick(event ClickEvent)
 	GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error)
 	ListClicksByLinkID(ctx context.Context, linkID int64) ([]ClickEvent, error)
@@ -132,6 +137,45 @@ func isQRScan(referer string) bool {
 	return q.Get("qr") != "" || q.Get("scan") != ""
 }
 
+func (r *sqliteRepository) CreateQRCode(ctx context.Context, linkID int64, shortURL string) (QRCode, error) {
+	query := `
+		INSERT INTO qr_codes (link_id, short_url)
+		VALUES (?, ?)
+		RETURNING id, link_id, short_url, created_at
+	`
+	var qc QRCode
+	err := r.db.QueryRowContext(ctx, query, linkID, shortURL).Scan(
+		&qc.ID, &qc.LinkID, &qc.ShortURL, &qc.CreatedAt,
+	)
+	return qc, err
+}
+
+func (r *sqliteRepository) GetQRCodeByLinkID(ctx context.Context, linkID int64) (QRCode, bool, error) {
+	var qc QRCode
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, link_id, short_url, created_at FROM qr_codes WHERE link_id = ?
+	`, linkID).Scan(&qc.ID, &qc.LinkID, &qc.ShortURL, &qc.CreatedAt)
+
+	if err == sql.ErrNoRows {
+		return QRCode{}, false, nil
+	}
+	return qc, err == nil, err
+}
+
+func (r *sqliteRepository) DeleteQRCodeByLinkID(ctx context.Context, linkID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM qr_codes WHERE link_id = ?`, linkID)
+	return err
+}
+
+func (r *sqliteRepository) GetQRCodeByID(ctx context.Context, id int64) (QRCode, bool, error) {
+	var qc QRCode
+	err := r.db.QueryRowContext(ctx, `SELECT id, link_id, short_url, created_at FROM qr_codes WHERE id = ?`, id).Scan(&qc.ID, &qc.LinkID, &qc.ShortURL, &qc.CreatedAt)
+	if err == sql.ErrNoRows {
+		return QRCode{}, false, nil
+	}
+	return qc, err == nil, err
+}
+
 func (r *sqliteRepository) RecordClick(event ClickEvent) {
 	ua := r.clicks.uaParser.Parse(event.UserAgent)
 	event.Browser = ua.Name
@@ -153,7 +197,11 @@ func (r *sqliteRepository) RecordClick(event ClickEvent) {
 	utmParams := parseUTMParams(event.Referer)
 	event.UTMParams = utmParams
 
-	event.QRScan = isQRScan(event.Referer)
+	if event.QRCodeID != nil {
+		event.QRScan = true
+	} else {
+		event.QRScan = isQRScan(event.Referer)
+	}
 
 	if event.IP != "" && r.clicks.geoIP != nil {
 		location, _ := r.clicks.geoIP.City(net.ParseIP(event.IP))
@@ -168,9 +216,10 @@ func (r *sqliteRepository) RecordClick(event ClickEvent) {
 func (r *sqliteRepository) GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error) {
 	var c ClickEvent
 	var utmParamsJSON []byte
+	var qrCodeID *int64
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip FROM link_clicks WHERE id = ?
-	`, id).Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP)
+		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip, qr_code_id FROM link_clicks WHERE id = ?
+	`, id).Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP, &qrCodeID)
 
 	if err == sql.ErrNoRows {
 		return ClickEvent{}, false, nil
@@ -178,12 +227,15 @@ func (r *sqliteRepository) GetClickByID(ctx context.Context, id int64) (ClickEve
 	if utmParamsJSON != nil {
 		json.Unmarshal(utmParamsJSON, &c.UTMParams)
 	}
+	if qrCodeID != nil {
+		c.QRCodeID = qrCodeID
+	}
 	return c, err == nil, err
 }
 
 func (r *sqliteRepository) ListClicksByLinkID(ctx context.Context, linkID int64) ([]ClickEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip FROM link_clicks
+		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip, qr_code_id FROM link_clicks
 		WHERE link_id = ? ORDER BY clicked_at DESC
 	`, linkID)
 	if err != nil {
@@ -195,11 +247,15 @@ func (r *sqliteRepository) ListClicksByLinkID(ctx context.Context, linkID int64)
 	for rows.Next() {
 		var c ClickEvent
 		var utmParamsJSON []byte
-		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP); err != nil {
+		var qrCodeID *int64
+		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP, &qrCodeID); err != nil {
 			return nil, err
 		}
 		if utmParamsJSON != nil {
 			json.Unmarshal(utmParamsJSON, &c.UTMParams)
+		}
+		if qrCodeID != nil {
+			c.QRCodeID = qrCodeID
 		}
 		clicks = append(clicks, c)
 	}
@@ -294,7 +350,7 @@ func (r *sqliteRepository) Enable(ctx context.Context, id int64) (Link, bool, er
 
 func (r *sqliteRepository) GetClicksByLinkIDWithFilters(ctx context.Context, linkID int64, filters map[string]interface{}) ([]ClickEvent, error) {
 	query := `
-        SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip
+        SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip, qr_code_id
         FROM link_clicks
         WHERE link_id = ?
     `
@@ -325,11 +381,15 @@ func (r *sqliteRepository) GetClicksByLinkIDWithFilters(ctx context.Context, lin
 	for rows.Next() {
 		var c ClickEvent
 		var utmParamsJSON []byte
-		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP); err != nil {
+		var qrCodeID *int64
+		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP, &qrCodeID); err != nil {
 			return nil, err
 		}
 		if utmParamsJSON != nil {
 			_ = json.Unmarshal(utmParamsJSON, &c.UTMParams)
+		}
+		if qrCodeID != nil {
+			c.QRCodeID = qrCodeID
 		}
 		clicks = append(clicks, c)
 	}

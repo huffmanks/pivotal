@@ -73,4 +73,55 @@ func TestDB_MigrationIdempotency(t *testing.T) {
 			t.Errorf("expected column %q in links table", name)
 		}
 	}
+
+	expectedClickColumns := map[string]bool{
+		"id":         false,
+		"link_id":    false,
+		"referer":    false,
+		"user_agent": false,
+		"clicked_at": false,
+		"browser":    false,
+		"os":         false,
+		"device":     false,
+		"country":    false,
+		"region":     false,
+		"city":       false,
+		"utm_params": false,
+		"qr_scan":    false,
+		"ip":         false,
+		"qr_code_id": false,
+	}
+
+	rows2, err := db.Query("PRAGMA table_info(link_clicks);")
+	if err != nil {
+		t.Fatalf("failed to inspect link_clicks table schema: %v", err)
+	}
+	defer rows2.Close()
+
+	for rows2.Next() {
+		var cid int
+		var name, typeStr string
+		var notNull, pk int
+		var dfltValue any
+		if err := rows2.Scan(&cid, &name, &typeStr, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("failed scanning column info: %v", err)
+		}
+		if _, ok := expectedClickColumns[name]; ok {
+			expectedClickColumns[name] = true
+		}
+	}
+	if err := rows2.Err(); err != nil {
+		t.Fatalf("error iterating table info rows: %v", err)
+	}
+
+	for name, found := range expectedClickColumns {
+		if !found {
+			t.Errorf("expected column %q in link_clicks table", name)
+		}
+	}
+
+	_, err = db.Query("PRAGMA table_info(qr_codes);")
+	if err != nil {
+		t.Fatalf("failed to inspect qr_codes table schema: %v", err)
+	}
 }

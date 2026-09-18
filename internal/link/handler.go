@@ -26,6 +26,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/links/{id}/enable", h.handleEnableLink)
 	mux.HandleFunc("GET /api/links/{id}/clicks", h.handleListClicks)
 	mux.HandleFunc("GET /api/links/{id}/clicks/{clickID}", h.handleGetClick)
+	mux.HandleFunc("GET /api/links/{id}/qr", h.handleGetQRCode)
+	mux.HandleFunc("GET /api/links/{id}/qr/download", h.handleDownloadQRCode)
 }
 
 func (h *Handler) handleCreateLink(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +196,49 @@ func (h *Handler) handleDisableLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.WriteJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) handleGetQRCode(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid link ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	qr, err := h.service.GetQRCode(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, `{"error":"QR code not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"Database error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, qr)
+}
+
+func (h *Handler) handleDownloadQRCode(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"Invalid link ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	png, err := h.service.GetQRCodeImage(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, `{"error":"QR code not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"Failed to generate QR code"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", `attachment; filename="qr-code.png"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(png)
 }
 
 func (h *Handler) handleEnableLink(w http.ResponseWriter, r *http.Request) {
