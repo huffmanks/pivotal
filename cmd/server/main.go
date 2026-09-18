@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -27,7 +26,7 @@ func main() {
 	}
 	defer database.Close()
 
-	linkRepo := link.NewRepository(database)
+	linkRepo := link.NewRepository(database, nil, nil)
 	linkSvc, err := link.NewService(linkRepo, cfg.CacheSize)
 	if err != nil {
 		log.Fatalf("failed to initialize link service: %v", err)
@@ -42,7 +41,7 @@ func main() {
 	srv := server.NewServer(linkSvc, webFS)
 
 	httpServer := &http.Server{
-		Addr:         fmt.Sprintf(":%s", cfg.Port),
+		Addr:         cfg.Address(),
 		Handler:      srv,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,

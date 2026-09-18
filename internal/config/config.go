@@ -1,17 +1,28 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
 
 type Config struct {
+	Host        string
 	Port        string
 	DatabaseURL string
 	CacheSize   int
 }
 
+func (c *Config) Address() string {
+	return fmt.Sprintf("%s:%s", c.Host, c.Port)
+}
+
 func Load() *Config {
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "3011"
@@ -30,6 +41,7 @@ func Load() *Config {
 	}
 
 	return &Config{
+		Host:        host,
 		Port:        port,
 		DatabaseURL: dbURL,
 		CacheSize:   cacheSize,

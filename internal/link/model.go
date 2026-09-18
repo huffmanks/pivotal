@@ -26,12 +26,32 @@ type Link struct {
 	FallbackURL    string     `json:"fallback_url,omitempty" db:"fallback_url"`
 }
 
+type AggregatedClick struct {
+	Date    string `json:"date,omitempty"`
+	Browser string `json:"browser,omitempty"`
+	OS      string `json:"os,omitempty"`
+	Country string `json:"country,omitempty"`
+	Region  string `json:"region,omitempty"`
+	City    string `json:"city,omitempty"`
+	QRScan  bool   `json:"qr_scan,omitempty"`
+	Count   int64  `json:"count"`
+}
+
 type ClickEvent struct {
-	ID        int64     `json:"id"`
-	LinkID    int64     `json:"link_id"`
-	Referer   string    `json:"referer"`
-	UserAgent string    `json:"user_agent"`
-	ClickedAt time.Time `json:"clicked_at"`
+	ID        int64             `json:"id"`
+	LinkID    int64             `json:"link_id"`
+	Referer   string            `json:"referer"`
+	UserAgent string            `json:"user_agent"`
+	ClickedAt time.Time         `json:"clicked_at"`
+	Browser   string            `json:"browser"`
+	OS        string            `json:"os"`
+	Device    string            `json:"device"`
+	Country   string            `json:"country"`
+	Region    string            `json:"region"`
+	City      string            `json:"city"`
+	UTMParams map[string]string `json:"utm_params"`
+	QRScan    bool              `json:"qr_scan"`
+	IP        string            `json:"ip,omitempty"`
 }
 
 type CreateLinkRequest struct {

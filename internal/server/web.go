@@ -2,9 +2,11 @@ package server
 
 import (
 	"io/fs"
+	"net"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"pivotal/internal/link"
 )
@@ -61,10 +63,13 @@ func WebHandler(files fs.FS, linkSvc link.Service) http.Handler {
 }
 
 func recordClick(linkSvc link.Service, l link.Link, r *http.Request) {
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	linkSvc.RecordClick(link.ClickEvent{
 		LinkID:    l.ID,
 		Referer:   r.Referer(),
 		UserAgent: r.UserAgent(),
+		ClickedAt: time.Now(),
+		IP:        ip,
 	})
 }
 

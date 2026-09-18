@@ -2,9 +2,13 @@ package link
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/mileusna/useragent"
+	"github.com/oschwald/geoip2-golang"
 )
 
 const (
@@ -13,19 +17,36 @@ const (
 	clickFlushInterval = 2 * time.Second
 )
 
-type clickTracker struct {
-	db     *sql.DB
-	events chan ClickEvent
-	done   chan struct{}
-	wg     sync.WaitGroup
-	once   sync.Once
+type UserAgentParser interface {
+	Parse(ua string) useragent.UserAgent
 }
 
-func newClickTracker(db *sql.DB) *clickTracker {
+type defaultUserAgentParser struct{}
+
+func (d *defaultUserAgentParser) Parse(ua string) useragent.UserAgent {
+	return useragent.Parse(ua)
+}
+
+type clickTracker struct {
+	db       *sql.DB
+	events   chan ClickEvent
+	done     chan struct{}
+	wg       sync.WaitGroup
+	once     sync.Once
+	uaParser UserAgentParser
+	geoIP    *geoip2.Reader
+}
+
+func newClickTracker(db *sql.DB, uaParser UserAgentParser, geoIP *geoip2.Reader) *clickTracker {
+	if uaParser == nil {
+		uaParser = &defaultUserAgentParser{}
+	}
 	tracker := &clickTracker{
-		db:     db,
-		events: make(chan ClickEvent, clickBufferSize),
-		done:   make(chan struct{}),
+		db:       db,
+		events:   make(chan ClickEvent, clickBufferSize),
+		done:     make(chan struct{}),
+		uaParser: uaParser,
+		geoIP:    geoIP,
 	}
 
 	tracker.wg.Add(1)
@@ -112,24 +133,25 @@ func (t *clickTracker) flush(batch []ClickEvent) error {
 	defer tx.Rollback()
 
 	stmtClick, err := tx.Prepare(`
-        INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at)
-        VALUES (?, ?, ?, ?)
-    `)
+		INSERT INTO link_clicks (link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
 	if err != nil {
 		return err
 	}
 	defer stmtClick.Close()
 
 	stmtCount, err := tx.Prepare(`
-        UPDATE links SET click_count = click_count + 1 WHERE id = ?
-    `)
+		UPDATE links SET click_count = click_count + 1 WHERE id = ?
+	`)
 	if err != nil {
 		return err
 	}
 	defer stmtCount.Close()
 
 	for _, click := range batch {
-		if _, err := stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt); err != nil {
+		utmParamsJSON, _ := json.Marshal(click.UTMParams)
+		if _, err := stmtClick.Exec(click.LinkID, click.Referer, click.UserAgent, click.ClickedAt, click.Browser, click.OS, click.Device, click.Country, click.Region, click.City, utmParamsJSON, click.QRScan, click.IP); err != nil {
 			return err
 		}
 		if _, err := stmtCount.Exec(click.LinkID); err != nil {

@@ -3,7 +3,12 @@ package link
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"net"
+	"net/url"
 	"time"
+
+	"github.com/oschwald/geoip2-golang"
 )
 
 type Repository interface {
@@ -19,6 +24,8 @@ type Repository interface {
 	RecordClick(event ClickEvent)
 	GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error)
 	ListClicksByLinkID(ctx context.Context, linkID int64) ([]ClickEvent, error)
+	GetClicksByLinkIDWithFilters(ctx context.Context, linkID int64, filters map[string]any) ([]ClickEvent, error)
+	GetAggregatedClicks(ctx context.Context, linkID int64, groupBy string, startDate, endDate *time.Time) ([]AggregatedClick, error)
 	Close()
 }
 
@@ -27,10 +34,10 @@ type sqliteRepository struct {
 	clicks *clickTracker
 }
 
-func NewRepository(database *sql.DB) Repository {
+func NewRepository(database *sql.DB, uaParser UserAgentParser, geoIP *geoip2.Reader) Repository {
 	return &sqliteRepository{
 		db:     database,
-		clicks: newClickTracker(database),
+		clicks: newClickTracker(database, uaParser, geoIP),
 	}
 }
 
@@ -101,27 +108,84 @@ func (r *sqliteRepository) List(ctx context.Context) ([]Link, error) {
 	return links, rows.Err()
 }
 
+func parseUTMParams(referer string) map[string]string {
+	params := map[string]string{}
+	u, err := url.Parse(referer)
+	if err != nil {
+		return params
+	}
+	q := u.Query()
+	for _, key := range []string{"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"} {
+		if val := q.Get(key); val != "" {
+			params[key] = val
+		}
+	}
+	return params
+}
+
+func isQRScan(referer string) bool {
+	u, err := url.Parse(referer)
+	if err != nil {
+		return false
+	}
+	q := u.Query()
+	return q.Get("qr") != "" || q.Get("scan") != ""
+}
+
 func (r *sqliteRepository) RecordClick(event ClickEvent) {
+	ua := r.clicks.uaParser.Parse(event.UserAgent)
+	event.Browser = ua.Name
+	event.OS = ua.OS
+
+	switch {
+	case ua.Bot:
+		event.Device = "Bot"
+	case ua.Mobile:
+		event.Device = "Mobile"
+	case ua.Tablet:
+		event.Device = "Tablet"
+	case ua.Desktop:
+		event.Device = "Desktop"
+	default:
+		event.Device = ua.Device
+	}
+
+	utmParams := parseUTMParams(event.Referer)
+	event.UTMParams = utmParams
+
+	event.QRScan = isQRScan(event.Referer)
+
+	if event.IP != "" && r.clicks.geoIP != nil {
+		location, _ := r.clicks.geoIP.City(net.ParseIP(event.IP))
+		event.Country = location.Country.Names["en"]
+		event.Region = location.Subdivisions[0].Names["en"]
+		event.City = location.City.Names["en"]
+	}
+
 	r.clicks.record(event)
 }
 
 func (r *sqliteRepository) GetClickByID(ctx context.Context, id int64) (ClickEvent, bool, error) {
 	var c ClickEvent
+	var utmParamsJSON []byte
 	err := r.db.QueryRowContext(ctx, `
-        SELECT id, link_id, referer, user_agent, clicked_at FROM link_clicks WHERE id = ?
-    `, id).Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt)
+		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip FROM link_clicks WHERE id = ?
+	`, id).Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP)
 
 	if err == sql.ErrNoRows {
 		return ClickEvent{}, false, nil
+	}
+	if utmParamsJSON != nil {
+		json.Unmarshal(utmParamsJSON, &c.UTMParams)
 	}
 	return c, err == nil, err
 }
 
 func (r *sqliteRepository) ListClicksByLinkID(ctx context.Context, linkID int64) ([]ClickEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, link_id, referer, user_agent, clicked_at FROM link_clicks
-        WHERE link_id = ? ORDER BY clicked_at DESC
-    `, linkID)
+		SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip FROM link_clicks
+		WHERE link_id = ? ORDER BY clicked_at DESC
+	`, linkID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +194,12 @@ func (r *sqliteRepository) ListClicksByLinkID(ctx context.Context, linkID int64)
 	var clicks []ClickEvent
 	for rows.Next() {
 		var c ClickEvent
-		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt); err != nil {
+		var utmParamsJSON []byte
+		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP); err != nil {
 			return nil, err
+		}
+		if utmParamsJSON != nil {
+			json.Unmarshal(utmParamsJSON, &c.UTMParams)
 		}
 		clicks = append(clicks, c)
 	}
@@ -222,4 +290,94 @@ func (r *sqliteRepository) Enable(ctx context.Context, id int64) (Link, bool, er
 		return Link{}, false, nil
 	}
 	return l, err == nil, err
+}
+
+func (r *sqliteRepository) GetClicksByLinkIDWithFilters(ctx context.Context, linkID int64, filters map[string]interface{}) ([]ClickEvent, error) {
+	query := `
+        SELECT id, link_id, referer, user_agent, clicked_at, browser, os, device, country, region, city, utm_params, qr_scan, ip
+        FROM link_clicks
+        WHERE link_id = ?
+    `
+	args := []interface{}{linkID}
+
+	if browser, ok := filters["browser"].(string); ok && browser != "" {
+		query += " AND browser = ?"
+		args = append(args, browser)
+	}
+	if osName, ok := filters["os"].(string); ok && osName != "" {
+		query += " AND os = ?"
+		args = append(args, osName)
+	}
+	if country, ok := filters["country"].(string); ok && country != "" {
+		query += " AND country = ?"
+		args = append(args, country)
+	}
+
+	query += " ORDER BY clicked_at DESC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clicks []ClickEvent
+	for rows.Next() {
+		var c ClickEvent
+		var utmParamsJSON []byte
+		if err := rows.Scan(&c.ID, &c.LinkID, &c.Referer, &c.UserAgent, &c.ClickedAt, &c.Browser, &c.OS, &c.Device, &c.Country, &c.Region, &c.City, &utmParamsJSON, &c.QRScan, &c.IP); err != nil {
+			return nil, err
+		}
+		if utmParamsJSON != nil {
+			_ = json.Unmarshal(utmParamsJSON, &c.UTMParams)
+		}
+		clicks = append(clicks, c)
+	}
+	return clicks, rows.Err()
+}
+
+func (r *sqliteRepository) GetAggregatedClicks(ctx context.Context, linkID int64, groupBy string, startDate, endDate *time.Time) ([]AggregatedClick, error) {
+	var dateFormat string
+	switch groupBy {
+	case "hour":
+		dateFormat = "%Y-%m-%d %H:00:00"
+	case "month":
+		dateFormat = "%Y-%m"
+	default:
+		dateFormat = "%Y-%m-%d"
+	}
+
+	query := `
+        SELECT strftime(?, clicked_at) AS period, COUNT(*) as count
+        FROM link_clicks
+        WHERE link_id = ?
+    `
+	args := []any{dateFormat, linkID}
+
+	if startDate != nil {
+		query += " AND clicked_at >= ?"
+		args = append(args, *startDate)
+	}
+	if endDate != nil {
+		query += " AND clicked_at <= ?"
+		args = append(args, *endDate)
+	}
+
+	query += " GROUP BY period ORDER BY period ASC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AggregatedClick
+	for rows.Next() {
+		var agg AggregatedClick
+		if err := rows.Scan(&agg.Date, &agg.Count); err != nil {
+			return nil, err
+		}
+		results = append(results, agg)
+	}
+	return results, rows.Err()
 }

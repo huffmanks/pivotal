@@ -11,7 +11,7 @@ func TestClickTracker_ConcurrencyAndShutdown(t *testing.T) {
 	db := setupClickDB(t)
 	defer db.Close()
 
-	tracker := newClickTracker(db)
+	tracker := newClickTracker(db, nil, nil)
 
 	const numWorkers = 10
 	const clicksPerWorker = 200

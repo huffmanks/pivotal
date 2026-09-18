@@ -511,7 +511,7 @@ func setupFullTest(t *testing.T) (*sql.DB, *service) {
 		t.Fatalf("failed to setup schema: %v", err)
 	}
 
-	repo := NewRepository(db)
+	repo := NewRepository(db, nil, nil)
 	cache, _ := lru.New[string, Link](100)
 	svc := &service{repo: repo, cache: cache}
 

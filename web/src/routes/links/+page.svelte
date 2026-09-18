@@ -1,16 +1,7 @@
 <script lang="ts">
   import { PUBLIC_BASE_URL } from "$env/static/public";
   import { onMount } from "svelte";
-
-  type Link = {
-    id: number;
-    slug: string;
-    destination_url: string;
-    is_custom: boolean;
-    click_count: number;
-    created_at: Date;
-    expires_at?: Date;
-  };
+  import type { Link } from "../../types";
 
   let links = $state<Link[]>([]);
   let loading = $state(true);
@@ -45,8 +36,11 @@
         class="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold tracking-wider text-neutral-500 uppercase dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-400">
         <tr>
           <th scope="col" class="px-4 py-3">ID</th>
+          <th scope="col" class="px-4 py-3">Title</th>
           <th scope="col" class="px-4 py-3">Slug</th>
           <th scope="col" class="px-4 py-3">Destination URL</th>
+          <th scope="col" class="px-4 py-3">Status</th>
+          <th scope="col" class="px-4 py-3">Type</th>
           <th scope="col" class="px-4 py-3 text-right">Clicks</th>
           <th scope="col" class="px-4 py-3">Created</th>
           <th scope="col" class="px-4 py-3">Expires</th>
@@ -57,6 +51,10 @@
           <tr class="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
             <td class="px-4 py-3.5 font-mono text-xs whitespace-nowrap text-neutral-400">
               {link.id}
+            </td>
+            <td
+              class="px-4 py-3.5 font-mono whitespace-nowrap text-neutral-700 dark:text-neutral-300">
+              {link.title}
             </td>
             <td
               class="px-4 py-3.5 font-medium whitespace-nowrap text-neutral-900 dark:text-neutral-100">
@@ -76,6 +74,14 @@
                 class="block truncate text-primary hover:text-primary/80 dark:text-primary dark:hover:text-primary/80">
                 {link.destination_url}
               </a>
+            </td>
+            <td
+              class="px-4 py-3.5 font-mono whitespace-nowrap text-neutral-700 dark:text-neutral-300">
+              {link.status}
+            </td>
+            <td
+              class="px-4 py-3.5 font-mono whitespace-nowrap text-neutral-700 dark:text-neutral-300">
+              {link.redirect_type}
             </td>
             <td
               class="px-4 py-3.5 text-right font-mono whitespace-nowrap text-neutral-700 dark:text-neutral-300">
